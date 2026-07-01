@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Gadfly runtime state, live-test scratch, and the builder's local design/build doc
+.gadfly/
+livetest/
+CLAUDE.md
+codemap.md
+decisions.md
+
+# Local editor / agent tooling
+.claude/
+.opencode/

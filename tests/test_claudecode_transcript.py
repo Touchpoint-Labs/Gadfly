@@ -1,0 +1,118 @@
+"""Reading the in-flight turn from a CC transcript: batch grouping (by message.id),
+complete uncut conversation, and the poll. Fixtures mirror the real format —
+each tool_use is its own record; parallel siblings share message.id."""
+import json
+
+from gadfly.adapters.claudecode.transcript import (
+    batch_of, poll_turn, session_messages, _message_id_of, _turn_tail,
+)
+
+
+def _user(text):
+    return {"type": "user", "message": {"content": text}}
+
+
+def _text(mid, text):
+    return {"type": "assistant", "message": {"id": mid, "content": [{"type": "text", "text": text}]}}
+
+
+def _think(mid, text):
+    return {"type": "assistant", "message": {"id": mid, "content": [{"type": "thinking", "thinking": text}]}}
+
+
+def _tool(mid, tid, name, inp):
+    return {"type": "assistant",
+            "message": {"id": mid, "content": [{"type": "tool_use", "id": tid, "name": name, "input": inp}]}}
+
+
+def _tool_result():
+    return {"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}
+
+
+def test_batch_grouped_by_message_id():
+    recs = [_user("do it"), _text("m1", "plan"),
+            _tool("m1", "t1", "Write", {"file_path": "/a"}),
+            _tool("m1", "t2", "Write", {"file_path": "/b"}),
+            _tool("m2", "t9", "Bash", {"command": "ls"})]  # different message — not in batch
+    assert _message_id_of(recs, "t2") == "m1"
+    batch = batch_of(recs, "m1")
+    assert [c.tool_use_id for c in batch] == ["t1", "t2"]            # order preserved, m2 excluded
+    assert batch[0].tool_name == "Write" and batch[1].tool_input == {"file_path": "/b"}
+
+
+def test_unknown_tool_use_id_has_no_message():
+    assert _message_id_of([_tool("m1", "t1", "Write", {})], "nope") is None
+
+
+def test_session_messages_complete_and_uncut():
+    long = "x" * 9000  # would have been truncated by the old char cap
+    recs = [_user("prev"), _text("m0", "old"),          # earlier turn — included (whole session)
+            _user("build the parser"), _think("m1", long), _text("m1", "I'll write it"),
+            _tool("m1", "t1", "Write", {"file_path": "/p"}), _tool_result()]
+    msgs = session_messages(recs)
+    assert [(m.role, m.kind) for m in msgs] == [
+        ("user", "text"), ("assistant", "text"),
+        ("user", "text"), ("assistant", "thinking"), ("assistant", "text")]
+    assert msgs[0].text == "prev"                        # mid-session install isn't blind
+    assert msgs[3].text == long                          # full thinking, nothing cut
+    # tool_use and tool_result are not conversation entries
+
+
+def test_session_messages_skips_harness_injected_user_records():
+    recs = [_user("<system-reminder>noise</system-reminder>"), _user("real prompt")]
+    msgs = session_messages(recs)
+    assert [m.text for m in msgs] == ["real prompt"]
+
+
+def test_poll_no_transcript_path_degrades():
+    assert poll_turn(None, "t1").found is False
+
+
+def test_poll_finds_turn_in_file(tmp_path):
+    p = tmp_path / "t.jsonl"
+    recs = [_user("go"), _text("m1", "ok"), _tool("m1", "t1", "Edit", {"file_path": "/a"})]
+    p.write_text("\n".join(json.dumps(r) for r in recs))
+    view = poll_turn(str(p), "t1", timeout=1.0)
+    assert view.found and view.batch_id == "m1"
+    assert [c.tool_use_id for c in view.batch] == ["t1"]
+    assert view.messages[0].text == "go"
+
+
+def test_turn_tail_expands_to_capture_whole_batch(tmp_path):
+    # A batch bigger than the initial tail window must still be captured whole — the window
+    # widens within the current message until its start boundary is in view (no sibling lost).
+    p = tmp_path / "t.jsonl"
+    big = "x" * 2000
+    recs = [_user("go " + big), _text("m1", "plan " + big),
+            _tool("m1", "t1", "Write", {"content": big}),
+            _tool("m1", "t2", "Write", {"content": big}),
+            _tool("m1", "t3", "Write", {"content": big})]
+    p.write_text("\n".join(json.dumps(r) for r in recs))
+    tail = _turn_tail(str(p), min_bytes=64)                          # tiny window forces expansion
+    assert [c.tool_use_id for c in batch_of(tail, "m1")] == ["t1", "t2", "t3"]
+
+
+def test_turn_tail_reads_only_current_turn(tmp_path):
+    # With old history far exceeding the window, the tail returns just the current turn
+    # (found whole) — not the whole file. Bounds batch detection to O(turn), not O(file).
+    p = tmp_path / "t.jsonl"
+    pad = "z" * 1000
+    recs = []
+    for i in range(8):
+        recs += [_user("q " + pad), _text(f"m{i}", "reply " + pad)]  # ~16KB of history
+    recs += [_tool("mX", "t1", "Edit", {"file_path": "/a"})]
+    p.write_text("\n".join(json.dumps(r) for r in recs))
+    tail = _turn_tail(str(p), min_bytes=512)                         # window << history
+    assert [c.tool_use_id for c in batch_of(tail, "mX")] == ["t1"]   # current call found whole
+    assert len(tail) < len(recs)                                     # did not read the whole file
+
+
+def test_poll_timeout_still_captures_conversation(tmp_path):
+    # The triggering call never appears (poll times out), but the transcript still holds
+    # the conversation — capture it so the store never freezes on a slow/large transcript.
+    p = tmp_path / "t.jsonl"
+    recs = [_user("go"), _text("m1", "working"), _tool("m1", "t1", "Edit", {"file_path": "/a"})]
+    p.write_text("\n".join(json.dumps(r) for r in recs))
+    view = poll_turn(str(p), "absent-id", timeout=0.1)
+    assert view.found is False                                    # triggering call never seen
+    assert [m.text for m in view.messages] == ["go", "working"]   # convo captured anyway
