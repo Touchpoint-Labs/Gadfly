@@ -47,7 +47,18 @@ def to_hook_output(verdict: Verdict) -> dict:
         return _hook("allow", additional=note)
     if d is Decision.DENY:
         note = verdict.note or "Blocked by Gadfly."
-        return _hook("deny", reason=note, system=f"Gadfly blocked: {note}")
+        reason = note
+        system = f"Gadfly blocked: {note}"
+        if verdict.undiscussed:  # a co-occurring surfaced question mustn't vanish under the block
+            # the action is already halted, so this isn't pause-until-answered; relay it
+            # verbatim (with options) to surface to the user and guide the revision
+            reason += ("\n\nSeparately, surface this decision to the user — relay it verbatim "
+                       f"and let their answer guide the revision:\n\nQuestion: "
+                       f"{verdict.undiscussed.question}")
+            if verdict.undiscussed.options:
+                reason += "\nOptions:\n" + "\n".join(f"- {o}" for o in verdict.undiscussed.options)
+            system += f" — also surfaced a decision: {verdict.undiscussed.question}"
+        return _hook("deny", reason=reason, system=system)
     if d is Decision.ASK:
         if verdict.undiscussed:  # a freeform question → relay via the builder, pausing this action
             q = verdict.undiscussed.question

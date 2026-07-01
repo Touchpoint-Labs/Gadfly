@@ -26,17 +26,37 @@ def test_worker_compacts_one_session_only(tmp_path):
 
 
 def test_worker_lock_prevents_duplicate_compaction(tmp_path):
+    import fcntl
+    import os
     store = SessionStore(tmp_path / ".gadfly")
     for text in ("a" * 60, "b" * 60):
         store._append("s", _convo(text))
     lock = store.gadfly_dir / "locks" / f"digest-{digest.session_slug('s')}.lock"
     lock.parent.mkdir(parents=True)
-    lock.write_text("busy")
+    held = os.open(lock, os.O_CREAT | os.O_WRONLY)   # a live worker genuinely holding the flock
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        assert (
+            compact_session(tmp_path, "s", lambda prev, ov: "DIGEST", budget=100) is False
+        )
+        assert digest.read(store.gadfly_dir, "s") == ""
+    finally:
+        os.close(held)
 
-    assert (
-        compact_session(tmp_path, "s", lambda prev, ov: "DIGEST", budget=100) is False
-    )
-    assert digest.read(store.gadfly_dir, "s") == ""
+
+def test_worker_reclaims_dead_workers_lock(tmp_path):
+    # a worker SIGKILLed past its cleanup leaves the lock FILE, but the kernel drops its
+    # flock on death — so the file is unlocked and compaction must proceed, not wedge the
+    # session's maintenance forever
+    store = SessionStore(tmp_path / ".gadfly")
+    for text in ("a" * 60, "b" * 60):
+        store._append("s", _convo(text))
+    lock = store.gadfly_dir / "locks" / f"digest-{digest.session_slug('s')}.lock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("4242")  # leftover file from a dead worker; no flock held
+
+    assert compact_session(tmp_path, "s", lambda prev, ov: "DIGEST", budget=100) is True
+    assert digest.read(store.gadfly_dir, "s") == "DIGEST"
 
 
 def test_worker_leaves_recent_quarter_unfolded(tmp_path):

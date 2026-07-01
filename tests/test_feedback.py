@@ -184,13 +184,19 @@ def test_feedback_pass_reconciles_then_extracts(tmp_path):
 
 
 def test_feedback_pass_bails_when_lock_held(tmp_path):
+    import fcntl
+    import os
     gadfly_dir, _ = _diverged(tmp_path)
     lock = _lock_path(gadfly_dir, "s", "feedback")
     lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text("held")
+    held = os.open(lock, os.O_CREAT | os.O_WRONLY)   # another pass genuinely holding the flock
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     ext = _Extractor([{"type": "project", "text": "x"}])
-    assert feedback_pass(tmp_path, "s", ext) is False            # another pass owns the lock
-    assert ext.corrections is None                               # did nothing
+    try:
+        assert feedback_pass(tmp_path, "s", ext) is False        # another pass owns the lock
+        assert ext.corrections is None                           # did nothing
+    finally:
+        os.close(held)
 
 
 def test_feedback_model_default():

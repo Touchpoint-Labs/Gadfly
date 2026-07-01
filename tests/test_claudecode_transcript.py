@@ -4,7 +4,7 @@ each tool_use is its own record; parallel siblings share message.id."""
 import json
 
 from gadfly.adapters.claudecode.transcript import (
-    batch_of, poll_turn, session_messages, _message_id_of, _turn_tail,
+    batch_of, poll_turn, session_messages, _message_id_of, _read, _turn_tail,
 )
 
 
@@ -62,6 +62,15 @@ def test_session_messages_skips_harness_injected_user_records():
     recs = [_user("<system-reminder>noise</system-reminder>"), _user("real prompt")]
     msgs = session_messages(recs)
     assert [m.text for m in msgs] == ["real prompt"]
+
+
+def test_read_tolerates_torn_line(tmp_path):
+    # the transcript is written concurrently; a still-flushing final line must lose one
+    # record, not crash the whole-file read (which would defer the action unreviewed)
+    p = tmp_path / "t.jsonl"
+    p.write_text(json.dumps(_user("hi")) + "\n" + '{"type": "assistant", "message": {"conte')
+    recs = _read(str(p))  # must not raise
+    assert len(recs) == 1 and recs[0].get("type") == "user"
 
 
 def test_poll_no_transcript_path_degrades():

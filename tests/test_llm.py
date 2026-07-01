@@ -1,7 +1,10 @@
-"""Retry logic and CLI-envelope parsing (no network — subprocess is mocked)."""
+"""Retry logic and CLI-envelope parsing (no network; subprocess mocked, except the two
+streaming tests that spawn a real child to exercise the timeout / stderr-drain fix)."""
 
 import json
 import subprocess
+import sys
+import time
 
 import pytest
 
@@ -198,3 +201,28 @@ def test_cli_non_json_is_permanent(monkeypatch):
     monkeypatch.setattr(llm.subprocess, "run", _fake_run("not json"))
     with pytest.raises(LLMError):
         ClaudeCliProvider().complete(system="s", prompt="p", model="m")
+
+
+# --- streaming path: timeout on a silent hang, no stderr-pipe deadlock (real subprocess) ---
+
+def test_streaming_times_out_on_silent_hang():
+    # a child that emits NO output must trip the deadline (the reader-thread timeout), not
+    # block forever on a silent readline
+    p = ClaudeCliProvider(timeout=0.5)
+    start = time.monotonic()
+    with pytest.raises(LLMTransientError):
+        p._complete_schema_streaming([sys.executable, "-c", "import time; time.sleep(30)"], "x")
+    assert time.monotonic() - start < 5   # tripped by the 0.5s deadline, not the 30s sleep
+
+
+def test_streaming_survives_large_stderr_without_deadlock():
+    # a child that floods stderr past the 64KB pipe buffer before writing stdout must not
+    # deadlock — stderr is a temp file, so the child never blocks on an undrained pipe
+    result = json.dumps({"type": "result", "structured_output": {"ok": True}})
+    script = (
+        "import sys; sys.stderr.write('e' * 300000); sys.stderr.flush(); "
+        f"sys.stdout.write({result!r} + chr(10)); sys.stdout.flush()"
+    )
+    p = ClaudeCliProvider(timeout=10)
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x")
+    assert json.loads(out) == {"ok": True}

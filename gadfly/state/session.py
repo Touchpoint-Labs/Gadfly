@@ -51,7 +51,15 @@ class SessionStore:
         path = self._path(session)
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        out: list[dict] = []
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                out.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue  # a torn line (concurrent append / killed hook) loses one record, not the store
+        return out
 
     def _append(self, session: str, record: dict) -> None:
         self._sessions.mkdir(parents=True, exist_ok=True)

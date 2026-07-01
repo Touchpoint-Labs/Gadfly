@@ -27,6 +27,7 @@ from gadfly.config import Config, load
 from gadfly.contracts import InterventionEvent, Verdict
 from gadfly.core import review
 from gadfly.factory import build_provider, build_reviewers, build_route_fn, build_store
+from gadfly.router import managed_doc_verdict
 from gadfly.worker import maybe_start_digest_worker, maybe_start_feedback_worker
 
 
@@ -119,19 +120,28 @@ def main() -> None:
         _emit(defer())  # unknown / custom tool — let CC's own permission flow apply
         return
 
+    # The one config-INDEPENDENT hard invariant: the builder never edits the memory files
+    # directly. Enforced before config load so a broken gadfly.toml can't downgrade it.
+    denied = managed_doc_verdict(action)
+    if denied is not None:
+        _emit(to_hook_output(denied))
+        return
+
     cwd = data.get("cwd") or "."
     session = data.get("session_id", "unknown")
     my_id = data.get("tool_use_id", "")
-    config = load(Path(cwd) / "gadfly.toml")
-    route_fn = build_route_fn(config)
-
-    # Deterministic, free: reads / routine commands terminal-allow — no poll, no LLM.
-    r = route_fn(action)
-    if r.terminal is not None:
-        _emit(to_hook_output(r.terminal))
-        return
-
     try:
+        # Config load is inside the guard: a malformed/invalid gadfly.toml defers (D2)
+        # rather than crashing the gate with an unhandled traceback.
+        config = load(Path(cwd) / "gadfly.toml")
+        route_fn = build_route_fn(config)
+
+        # Deterministic, free: reads / routine commands terminal-allow — no poll, no LLM.
+        r = route_fn(action)
+        if r.terminal is not None:
+            _emit(to_hook_output(r.terminal))
+            return
+
         view = poll_turn(
             data.get("transcript_path"), my_id, timeout=config.poll_timeout
         )

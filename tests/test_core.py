@@ -231,6 +231,20 @@ def test_deadlock_surfaces_after_cap(tmp_path):
     assert calls["code"] == 3  # the 4th never reached a reviewer
 
 
+def test_deadlock_surfaces_once_then_defers_to_review(tmp_path):
+    # after surfacing the deadlock once, Gadfly stops short-circuiting: the retry falls back
+    # to normal review, where the supervisors read the user's actual answer in the convo
+    # (a blind allow would ignore a 'hold' answer and invert the surface's "stays paused")
+    revs, calls = reviewers(code=Verdict(Decision.DENY, note="bug"))
+    store = SessionStore(tmp_path / ".g")
+    for _ in range(3):
+        assert review(ev(edit()), revs, store)[0].decision is Decision.DENY
+    assert review(ev(edit()), revs, store)[0].decision is Decision.ASK   # 4th: surface once
+    assert calls["code"] == 3                                            # surface didn't review
+    assert review(ev(edit()), revs, store)[0].decision is Decision.DENY  # 5th: back to review
+    assert calls["code"] == 4                                            # reviewer consulted again
+
+
 def test_no_deadlock_across_different_actions(tmp_path):
     revs, calls = reviewers(code=Verdict(Decision.DENY, note="bug"))
     store = SessionStore(tmp_path / ".g")

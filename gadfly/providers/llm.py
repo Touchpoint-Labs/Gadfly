@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import tempfile
+import threading
 import time
 from typing import Optional, Protocol
 
@@ -84,25 +86,44 @@ class ClaudeCliProvider:
         return ["--allowedTools", ""]
 
     def _complete_schema_streaming(self, cmd: list[str], prompt: str) -> str:
+        # stderr → a temp file, never a PIPE: streaming drains only stdout, so an undrained
+        # stderr PIPE would deadlock a chatty child once its 64KB buffer fills.
+        stderr_file = tempfile.TemporaryFile()
         proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=stderr_file,
             text=True,
             env={**os.environ, "GADFLY_HOOK_DISABLED": "1"},
         )
+        # Read stdout on a thread so the deadline is enforced even if the child produces NO
+        # output and hangs silently — a blocking `for line in proc.stdout` could not be.
+        lines: "queue.Queue[Optional[str]]" = queue.Queue()
+
+        def _pump() -> None:
+            try:
+                for line in proc.stdout:  # type: ignore[union-attr]
+                    lines.put(line)
+            finally:
+                lines.put(None)  # sentinel: stdout closed
+
         try:
             assert proc.stdin is not None
             proc.stdin.write(prompt)
             proc.stdin.close()
+            threading.Thread(target=_pump, daemon=True).start()
             deadline = time.monotonic() + self._timeout
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                if time.monotonic() >= deadline:
-                    raise LLMTransientError(
-                        f"claude -p timed out after {self._timeout}s"
-                    )
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise LLMTransientError(f"claude -p timed out after {self._timeout}s")
+                try:
+                    line = lines.get(timeout=remaining)
+                except queue.Empty:
+                    raise LLMTransientError(f"claude -p timed out after {self._timeout}s")
+                if line is None:  # stdout closed without a structured result
+                    break
                 try:
                     event = json.loads(line)
                 except json.JSONDecodeError:
@@ -113,7 +134,6 @@ class ClaudeCliProvider:
                         item.get("type") == "tool_use"
                         and item.get("name") == "StructuredOutput"
                     ):
-                        proc.terminate()
                         return json.dumps(item.get("input") or {})
                 if event.get("type") == "result":
                     if event.get("is_error"):
@@ -123,13 +143,13 @@ class ClaudeCliProvider:
                     out = event.get("structured_output")
                     if out is not None:
                         return json.dumps(out)
-            stderr = ""
-            if proc.stderr is not None:
-                stderr = proc.stderr.read().strip()
             if proc.wait(timeout=1) != 0:
-                raise LLMTransientError(
-                    f"claude -p exited {proc.returncode}: {stderr[:200]}"
-                )
+                try:
+                    stderr_file.seek(0)
+                    err = stderr_file.read().decode("utf-8", "replace").strip()[:200]
+                except OSError:
+                    err = ""
+                raise LLMTransientError(f"claude -p exited {proc.returncode}: {err}")
             raise LLMError(
                 "claude -p returned no structured_output for a schema request"
             )
@@ -144,6 +164,7 @@ class ClaudeCliProvider:
                     proc.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     proc.kill()
+            stderr_file.close()
 
     def complete(
         self,

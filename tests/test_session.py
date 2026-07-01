@@ -20,6 +20,19 @@ def test_append_convo_dedups(tmp_path):
     assert len(convo) == 2 and convo[0]["text"] == "do it"
 
 
+def test_read_tolerates_a_torn_line(tmp_path):
+    # a concurrent append killed mid-write leaves a torn JSONL line — it must lose one
+    # record, not raise on every subsequent gate and silently disable review for the session
+    s = SessionStore(tmp_path / ".gadfly")
+    s.append_convo("s1", [ConvoEntry("user", "text", "keep me")])
+    torn = tmp_path / ".gadfly" / "sessions" / "s1.jsonl"
+    with torn.open("a") as f:
+        f.write('{"t": "convo", "role": "user", "kind": "text", "text": "half')  # no close/newline
+    recs = s.records("s1")  # must not raise
+    convo = [r for r in recs if r["t"] == "convo"]
+    assert len(convo) == 1 and convo[0]["text"] == "keep me"
+
+
 def test_append_gate_records_actions_and_verdicts(tmp_path):
     s = SessionStore(tmp_path / ".gadfly")
     s.append_gate(_event(), [Verdict(decision=Decision.DENY, note="bug")], ts="2026-06-09T00:00:00+00:00")

@@ -74,6 +74,8 @@ def merge(verdicts: list[Verdict]) -> Verdict:
 # True deadlock: the builder retrying the SAME action past this many denials stops
 # being a review problem and becomes a human call (spec: surface both sides).
 _DEADLOCK_CAP = 3
+_DEADLOCK_Q = "Deadlock:"  # prefix marking a deadlock surface in the ledger, so a later
+#                            gate can tell the action was already put to the human
 
 
 def _action_key(type_str, target, payload) -> str:
@@ -83,28 +85,37 @@ def _action_key(type_str, target, payload) -> str:
 def _deadlock_verdict(
     store: SessionStore, session: str, action: NormalizedAction
 ) -> Optional[Verdict]:
-    """ASK with both sides once an identical action has been denied past the cap —
-    deterministic, free, and it spends no further review on the loop."""
+    """Break a recurring deny loop. Once an identical action has been denied past the cap,
+    surface both sides to the human ONCE. After that, stop short-circuiting (return None) so
+    the retry falls to normal review — where the supervisors read the user's actual answer in
+    the conversation (allow a user-approved repeat with a note, hold the line otherwise).
+    Without the one-time surface the ASK recurs forever (its verdict is an 'ask', never a
+    'deny', so the cap never clears); a deterministic allow instead would ignore the answer
+    and could let a 'hold' decision sail through."""
     key = _action_key(action.type.value, action.target, action.payload)
-    notes: list[str] = []
+    denials: list[str] = []
+    surfaced = False
     for r in store.records(session):
         if r.get("t") != "gate":
             continue
         for a, v in zip(r.get("actions", []), r.get("verdicts", [])):
-            if (
-                v.get("decision") == "deny"
-                and _action_key(a.get("type"), a.get("target"), a.get("payload")) == key
-            ):
-                notes.append(v.get("note") or "")
-    if len(notes) < _DEADLOCK_CAP:
-        return None
-    sides = " | ".join(dict.fromkeys(n for n in notes if n))  # dedupe, keep order
+            if _action_key(a.get("type"), a.get("target"), a.get("payload")) != key:
+                continue
+            if v.get("decision") == "deny":
+                denials.append(v.get("note") or "")
+            elif v.get("decision") == "ask" and (
+                v.get("undiscussed") or {}
+            ).get("question", "").startswith(_DEADLOCK_Q):
+                surfaced = True
+    if len(denials) < _DEADLOCK_CAP or surfaced:
+        return None  # under the cap, or already surfaced once → let normal review proceed
+    sides = " | ".join(dict.fromkeys(n for n in denials if n))  # dedupe, keep order
     return Verdict(
         decision=Decision.ASK,
         undiscussed=UndiscussedDecision(
             question=(
-                f"Deadlock: the builder has retried this same action after "
-                f"{len(notes)} denials, and it stays paused until you decide. "
+                f"{_DEADLOCK_Q} the builder has retried this same action after "
+                f"{len(denials)} denials, and it stays paused until you decide. "
                 f"Objections so far: {sides or 'none recorded'}. How should this proceed?"
             ),
             options=[

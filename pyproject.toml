@@ -11,8 +11,8 @@ requires-python = ">=3.12"
 [project.optional-dependencies]
 dev = ["pytest"]
 
-[tool.setuptools]
-packages = ["gadfly"]
+[tool.setuptools.packages.find]
+include = ["gadfly*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

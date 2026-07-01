@@ -27,6 +27,20 @@ def test_deny_feeds_reason_back_and_logs():
     assert "off-by-one" in out["systemMessage"]
 
 
+def test_deny_with_undiscussed_surfaces_the_question_too():
+    # a code DENY co-occurring with an architect ASK+undiscussed (merge → DENY) must not
+    # drop the surfaced question: it rides along in the reason (verbatim + options) and in
+    # the user's log line, mirroring the ASK path
+    out = to_hook_output(Verdict(Decision.DENY, note="off-by-one in loop bound",
+        undiscussed=UndiscussedDecision(question="JWT or sessions?", options=["JWT", "sessions"])))
+    assert _pd(out) == "deny"
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "off-by-one" in reason                        # the block is still relayed
+    assert "JWT or sessions?" in reason                  # the surfaced question rides along
+    assert "- JWT" in reason and "- sessions" in reason  # options verbatim, like the ASK path
+    assert "JWT or sessions?" in out["systemMessage"]    # user sees it even if the builder fumbles
+
+
 def test_ask_with_undiscussed_relays_question_as_deny():
     out = to_hook_output(Verdict(Decision.ASK, undiscussed=UndiscussedDecision(
         question="JWT or sessions?", options=["JWT", "sessions"])))

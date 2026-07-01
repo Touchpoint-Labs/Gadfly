@@ -40,11 +40,19 @@ class TurnView:
 
 
 def _read(path: str) -> list[dict]:
+    out: list[dict] = []
     try:
         with open(path) as f:
-            return [json.loads(line) for line in f if line.strip()]
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue  # a still-flushing / torn line loses one record, not the whole read
     except OSError:
         return []
+    return out
 
 
 def _content(rec: dict) -> list:

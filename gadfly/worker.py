@@ -8,6 +8,7 @@ even if a worker lags.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import os
 import subprocess
 import sys
@@ -27,11 +28,19 @@ def _lock_path(gadfly_dir: Path, session: str, kind: str = "digest") -> Path:
 
 
 def _claim_lock(path: Path) -> int | None:
+    """Acquire the per-session lock, or None if another LIVE worker holds it. The lock is an
+    advisory flock: the kernel releases it when the owner exits — even on SIGKILL — so a
+    worker killed past its cleanup can never wedge the session's maintenance forever. The
+    lock file is left in place on release (unlinking would race a waiter); its content is
+    just the owner pid, for debugging."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY)
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:                      # held by a live worker
+        os.close(fd)
         return None
+    os.ftruncate(fd, 0)
     os.write(fd, str(os.getpid()).encode())
     return fd
 
@@ -58,11 +67,7 @@ def compact_session(
             store, session, store.gadfly_dir, summarize, budget=budget
         )
     finally:
-        os.close(fd)
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        os.close(fd)  # releases the flock; the lock file is left in place
 
 
 def feedback_pass(workspace: Path, session: str, extractor) -> bool:
@@ -80,11 +85,7 @@ def feedback_pass(workspace: Path, session: str, extractor) -> bool:
         feedback.run_extraction(extractor, workspace=Path(workspace), gadfly_dir=gadfly_dir)
         return True
     finally:
-        os.close(fd)
-        try:
-            lock.unlink()
-        except OSError:
-            pass
+        os.close(fd)  # releases the flock; the lock file is left in place
 
 
 def start_digest_worker(workspace: Path, session: str) -> None:

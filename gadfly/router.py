@@ -36,9 +36,20 @@ def _allow(reason: str) -> Route:
     return Route(reason=reason, terminal=Verdict(decision=Decision.ALLOW))
 
 
-def _deny(note: str) -> Route:
-    return Route(reason="managed doc — builder edit blocked",
-                 terminal=Verdict(decision=Decision.DENY, note=note))
+_MANAGED_DOC_NOTE = (
+    "spec.md, claude.md, and decisions.md are maintained by Gadfly and the human, not "
+    "the builder — describe the change in the conversation instead of editing the file "
+    "directly."
+)
+
+
+def managed_doc_verdict(action: NormalizedAction) -> Optional[Verdict]:
+    """The one deterministic, config-INDEPENDENT hard DENY: the builder never edits the
+    memory files directly. Exposed so the gate can enforce it before config load — a broken
+    gadfly.toml must not downgrade this invariant to the host's permission flow."""
+    if action.type in (ActionType.EDIT, ActionType.CREATE) and _is_managed_doc(action.target):
+        return Verdict(decision=Decision.DENY, note=_MANAGED_DOC_NOTE)
+    return None
 
 
 def _route_to(supervisors: set[str], reason: str) -> Route:
@@ -110,8 +121,9 @@ def _segment_is_safe(segment: str) -> bool:
 def _is_routine_command(cmd: str) -> bool:
     if _HARD_DISQUALIFY.search(cmd) or _BACKGROUND.search(cmd):
         return False
-    # only && || ; | remain as composition — every segment must be safe
-    segments = re.split(r"[;|]", cmd.replace("&&", ";").replace("||", ";"))
+    # && || ; | and newlines all separate commands — every segment must be safe
+    # (a newline is a command terminator, so "ls\nrm -rf /" is two commands, not one)
+    segments = re.split(r"[;|\n\r]", cmd.replace("&&", ";").replace("||", ";"))
     segments = [s.strip() for s in segments if s.strip()]
     return bool(segments) and all(_segment_is_safe(s) for s in segments)
 
@@ -137,10 +149,9 @@ def route(action: NormalizedAction, *, auto_allow_docs: bool = True,
         return _route_to(enabled, reason + " — survivor covers") if enabled else _allow(reason)
 
     if t in (ActionType.EDIT, ActionType.CREATE):
-        if _is_managed_doc(action.target):  # before _is_doc: Gadfly-owned files stay blocked
-            return _deny("spec.md, claude.md, and decisions.md are maintained by Gadfly "
-                         "and the human, not the builder — describe the change in the "
-                         "conversation instead of editing the file directly.")
+        mv = managed_doc_verdict(action)  # config-independent hard invariant, before _is_doc
+        if mv is not None:
+            return Route(reason="managed doc — builder edit blocked", terminal=mv)
         if _is_skip(action.target):
             return _allow("notebook — skipped")
         if _is_doc(action.target):
