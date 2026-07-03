@@ -10,7 +10,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-193%20passing-brightgreen.svg)](tests)
+[![Tests](https://img.shields.io/badge/tests-215%20passing-brightgreen.svg)](tests)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-v1%20dogfooding-orange.svg)](#status)
 [![For Claude Code](https://img.shields.io/badge/for-Claude%20Code-8A2BE2.svg)](https://claude.com/claude-code)
@@ -183,25 +183,22 @@ See [`spec.md`](spec.md) for the full design.
 ## Quickstart *(v1: Claude Code)*
 
 ```bash
-# 1. install into a venv (zero runtime dependencies — pure stdlib)
-python -m venv .venv && . .venv/bin/activate
-pip install -e .
-
-# 2. run the tests
-pytest
+pip install git+https://github.com/Touchpoint-Labs/Gadfly.git   # zero deps; PyPI soon
+cd your-project
+gadfly init      # wires the hooks + scaffolds gadfly.toml — conflict-safe, leaves your own hooks
+gadfly status    # confirm it's live
 ```
 
-Then, in the project you want supervised, point Claude Code's hooks at Gadfly in
-`.claude/settings.json` (`PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`,
-`UserPromptSubmit` → `python -m gadfly.adapters.claudecode.hooks.*`), drop a `spec.md` at
-the project root, and start coding. Gadfly rides your existing Claude Code access — **no API
-key required.** Tune everything (models, autonomy dial, review scope) in `gadfly.toml`.
+Then write a `spec.md` at the project root — Gadfly's midwife asks about the gaps on your
+first prompts — and start coding in Claude Code. Gadfly rides your existing access, **no API
+key required.** Tune models, the autonomy dial, and review scope in `gadfly.toml`; pause
+anytime with `gadfly disable` / `gadfly enable`, or remove it cleanly with `gadfly uninstall`.
 
 ## Status
 
 **v1** — Python 3.12+, zero runtime dependencies, in active dogfooding on Claude Code. Two
-supervisors, pre-execution review, five-file memory, the self-improvement loop, and
-cover-for-other are built and live-tested (193 passing tests).
+supervisors, pre-execution review, five-file memory, the self-improvement loop, cover-for-other,
+and a one-command install (`gadfly init`) are built and live-tested (215 passing tests).
 
 ## License
 

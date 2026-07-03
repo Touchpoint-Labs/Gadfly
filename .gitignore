@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+build/
+dist/
 
 # Gadfly runtime state, live-test scratch, and the builder's local design/build doc
 .gadfly/

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -124,3 +125,13 @@ class EditLedger:
         if current == recorded:
             return None
         return "deleted" if current is None else "modified"
+
+    def reset(self) -> None:
+        """Drop all authorship records + snapshots — current disk becomes the new baseline.
+        `gadfly enable` calls this after a disabled window so builder edits made while Gadfly
+        was off aren't later read as human corrections."""
+        try:
+            self.path.unlink()
+        except OSError:
+            pass
+        shutil.rmtree(self.dir / "snapshots", ignore_errors=True)

@@ -4,15 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gadfly"
-version = "0.0.0"
+version = "0.1.0"
 description = "Socratic supervision layer for AI coding agents"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
 dev = ["pytest"]
 
+[project.scripts]
+gadfly = "gadfly.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["gadfly*"]
+
+[tool.setuptools.package-data]
+gadfly = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

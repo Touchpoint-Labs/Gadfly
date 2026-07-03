@@ -24,6 +24,7 @@ import os
 import sys
 from pathlib import Path
 
+from gadfly.adapters.claudecode.install import is_disabled
 from gadfly.config import load
 from gadfly.factory import (
     build_compactor,
@@ -41,6 +42,8 @@ def main() -> None:
     try:
         data = json.load(sys.stdin)
         cwd = Path(data.get("cwd") or ".")
+        if is_disabled(cwd):
+            return
         session = data.get("session_id", "unknown")
         config = load(cwd / "gadfly.toml")
         provider = build_provider(config)

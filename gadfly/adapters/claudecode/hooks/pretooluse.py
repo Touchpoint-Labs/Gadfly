@@ -20,6 +20,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gadfly.adapters.claudecode import batch
+from gadfly.adapters.claudecode.install import is_disabled
 from gadfly.adapters.claudecode.normalize import normalize
 from gadfly.adapters.claudecode.transcript import TurnView, poll_turn
 from gadfly.adapters.claudecode.verdict import defer, to_hook_output
@@ -128,6 +129,9 @@ def main() -> None:
         return
 
     cwd = data.get("cwd") or "."
+    if is_disabled(cwd):  # `gadfly disable` pauses review; the managed-doc floor above still holds
+        _emit(defer())
+        return
     session = data.get("session_id", "unknown")
     my_id = data.get("tool_use_id", "")
     try:

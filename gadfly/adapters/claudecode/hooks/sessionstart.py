@@ -29,6 +29,7 @@ import os
 import sys
 from pathlib import Path
 
+from gadfly.adapters.claudecode.install import is_disabled
 from gadfly.config import load
 from gadfly.factory import build_compactor, build_provider, memory_budgets_dict
 from gadfly.state import compaction
@@ -77,6 +78,8 @@ def main() -> None:
     try:
         data = json.load(sys.stdin)
         cwd = data.get("cwd") or "."
+        if is_disabled(cwd):
+            return  # disabled: fully off — capture pauses too; `enable` re-baselines the ledger
         session = data.get("session_id", "unknown")
         workspace = Path(cwd)
         gadfly_dir = workspace / ".gadfly"

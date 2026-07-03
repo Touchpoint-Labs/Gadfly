@@ -22,7 +22,7 @@ from .state.decisions import Decision, DecisionLedger
 from .state.memory import ProjectMemory
 from .state.session import SessionStore
 
-_PROMPTS = Path(__file__).resolve().parent.parent / "prompts"
+_PROMPTS = Path(__file__).resolve().parent / "prompts"
 _CONVO_TAIL_BUDGET = 24000
 
 
