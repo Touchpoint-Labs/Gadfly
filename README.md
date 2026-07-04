@@ -26,16 +26,15 @@ babysitting a diff.
 
 ## Gadfly in action
 
-| The builder's next move | Gadfly | Why |
-|---|---|---|
-| ✏️ `Edit api/auth.py` — *store the JWT in localStorage* | 💬 **question** · architect | spec says tokens must never be JS-reachable; localStorage is XSS-readable — an httpOnly cookie keeps it off the heap. Reconsider? |
-| ✏️ `Edit billing.py` — *`for i in range(len(items) - 1)`* | ⛔ **block** · code | off-by-one — the last item is never summed |
-| ▶️ `Bash pip install some-orm` | ✋ **surface → you** | adds an ORM your spec never mentioned — a load-bearing call. Raw SQL, or adopt it? |
-| 👁️ `Read config.py` · ▶️ `pytest -q` | ✅ **allow** · silent | fine — stays out of the way |
+| When your agent… | Gadfly… |
+|---|---|
+| makes a safe, routine change | ✅ **allows** it — silently |
+| drifts from what you asked | 💬 **questions** it, mid-flight |
+| writes a real bug | ⛔ **blocks** it before it runs |
+| makes a big call your spec never settled | ✋ **surfaces** it to you |
 
-*One loop, four verdicts: it stays silent when things are fine, **questions** a drift,
-**blocks** a real bug, and **surfaces** a genuinely consequential call to you — all before
-anything executes.*
+*Four verdicts, checked on every tool call — all before anything executes. Gadfly stays quiet
+when the work is on track, and speaks only when it matters.*
 
 ## The problem
 
@@ -157,13 +156,13 @@ agent-agnostic, LLM-agnostic, and owns its own normalized state.
 
 ```mermaid
 flowchart TB
-    agent["🧑‍💻 &nbsp;Your coding agent · Claude Code"]
-    adapter["🔌 &nbsp;Agent Adapter<br/><i>the only code that speaks the agent's native format</i>"]
-    core["⚙️ &nbsp;Pure Core — review → verdicts<br/>Tier-0 router · Architect + Code lenses · five-file memory"]
-    llm["🧠 &nbsp;LLM Provider Adapter · Anthropic (claude -p)"]
-    agent -->|"native hooks · PreToolUse · PostToolUse · SessionStart · Stop"| adapter
-    adapter -->|"neutral contract · event → verdict"| core
-    core -->|"provider-neutral client"| llm
+    agent["🧑‍💻 &nbsp;Your coding agent<br/>Claude Code"]
+    adapter["🔌 &nbsp;Agent Adapter"]
+    core["⚙️ &nbsp;Pure Core<br/>Architect + Code supervisors · memory"]
+    llm["🧠 &nbsp;LLM Provider<br/>Anthropic"]
+    agent -->|"every tool call"| adapter
+    adapter -->|"review → verdict"| core
+    core --> llm
     style agent fill:#161b26,stroke:#4a5568,color:#f0eae6
     style adapter fill:#1a2230,stroke:#3a5a7a,color:#f0eae6
     style core fill:#241a33,stroke:#8A48A4,color:#f0eae6
