@@ -1,0 +1,100 @@
+"""Codemap staleness — deterministic, mtime-based nudge counting (no LLM)."""
+import json
+import os
+from datetime import datetime, timedelta, timezone
+
+from gadfly.state import codemap
+from gadfly.state.edits import EditLedger
+
+
+def _entry(file, ts):
+    return json.dumps({"ts": ts.isoformat(), "session": "s", "tool": "Edit",
+                       "file": file, "hash": "x"})
+
+
+def _ledger(gadfly_dir, *entries):
+    p = gadfly_dir / "edits.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("\n".join(entries) + "\n")
+
+
+def _set_mtime(path, when):
+    os.utime(path, (path.stat().st_atime, when.timestamp()))
+
+
+# --- the ledger counter ------------------------------------------------------
+
+def test_edits_since_counts_newer_and_skips_docs(tmp_path):
+    g = tmp_path / ".gadfly"
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    _ledger(g,
+            _entry("/p/a.py", base),                          # older than cutoff
+            _entry("/p/b.py", base + timedelta(hours=2)),     # newer
+            _entry("/p/c.py", base + timedelta(hours=3)),     # newer
+            _entry("/p/README.md", base + timedelta(hours=4)))  # newer but .md → excluded
+    cutoff = (base + timedelta(hours=1)).timestamp()
+    assert EditLedger(g).edits_since(cutoff) == 2
+
+
+# --- pending() + nudge(), mtime-relative to codemap.md -----------------------
+
+def test_pending_counts_edits_after_codemap(tmp_path):
+    g = tmp_path / ".gadfly"
+    cm = tmp_path / "codemap.md"
+    cm.write_text("map")
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
+    _set_mtime(cm, base - timedelta(minutes=1))               # codemap is older than the edits
+    assert codemap.pending(tmp_path) == 8
+    msg = codemap.nudge(tmp_path)
+    assert msg and "8 code edits" in msg
+
+
+def test_below_threshold_no_nudge(tmp_path):
+    g = tmp_path / ".gadfly"
+    cm = tmp_path / "codemap.md"
+    cm.write_text("map")
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(7)])
+    _set_mtime(cm, base - timedelta(minutes=1))
+    assert codemap.pending(tmp_path) == 7
+    assert codemap.nudge(tmp_path) is None                    # 7 < THRESHOLD (8)
+
+
+def test_updating_codemap_resets_the_count(tmp_path):
+    g = tmp_path / ".gadfly"
+    cm = tmp_path / "codemap.md"
+    cm.write_text("map")
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
+    _set_mtime(cm, base + timedelta(minutes=1))               # codemap written AFTER the edits
+    assert codemap.pending(tmp_path) == 0                     # self-reset via mtime
+    assert codemap.nudge(tmp_path) is None
+
+
+def test_no_codemap_counts_everything(tmp_path):
+    g = tmp_path / ".gadfly"
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
+    assert codemap.pending(tmp_path) == 8                     # no codemap.md → since=0
+    assert codemap.nudge(tmp_path) is not None
+
+
+# --- the gate rides the nudge on an allow, never on a deny -------------------
+
+def test_emit_verdict_rides_nudge_on_allow(monkeypatch, capsys):
+    from gadfly.adapters.claudecode.hooks import pretooluse
+    from gadfly.contracts import Decision, Verdict
+    monkeypatch.setattr(pretooluse.codemap, "nudge", lambda cwd: "REFRESH CODEMAP")
+    pretooluse._emit_verdict(Verdict(Decision.ALLOW), "/x")
+    out = json.loads(capsys.readouterr().out)
+    assert "REFRESH CODEMAP" in out["hookSpecificOutput"]["additionalContext"]
+
+
+def test_emit_verdict_no_nudge_on_deny(monkeypatch, capsys):
+    from gadfly.adapters.claudecode.hooks import pretooluse
+    from gadfly.contracts import Decision, Verdict
+    monkeypatch.setattr(pretooluse.codemap, "nudge", lambda cwd: "REFRESH CODEMAP")
+    pretooluse._emit_verdict(Verdict(Decision.DENY, note="bad"), "/x")
+    out = json.loads(capsys.readouterr().out)
+    assert "REFRESH CODEMAP" not in out.get("hookSpecificOutput", {}).get("additionalContext", "")

@@ -25,15 +25,30 @@ from gadfly.adapters.claudecode.normalize import normalize
 from gadfly.adapters.claudecode.transcript import TurnView, poll_turn
 from gadfly.adapters.claudecode.verdict import defer, to_hook_output
 from gadfly.config import Config, load
-from gadfly.contracts import InterventionEvent, Verdict
+from gadfly.contracts import Decision, InterventionEvent, Verdict
 from gadfly.core import review
 from gadfly.factory import build_provider, build_reviewers, build_route_fn, build_store
 from gadfly.router import managed_doc_verdict
+from gadfly.state import codemap
 from gadfly.worker import maybe_start_digest_worker, maybe_start_feedback_worker
 
 
 def _emit(obj: dict) -> None:
     print(json.dumps(obj))
+
+
+def _emit_verdict(verdict: Verdict, cwd: str) -> None:
+    """Emit a review verdict, riding a codemap-staleness reminder on it when the action is
+    allowed (never on a deny or a surfaced ask). Deterministic — a ledger count, no LLM."""
+    out = to_hook_output(verdict)
+    if verdict.decision in (Decision.ALLOW, Decision.ALLOW_WITH_NOTE):
+        note = codemap.nudge(Path(cwd))
+        if note:
+            hso = out.setdefault("hookSpecificOutput", {})
+            hso.setdefault("hookEventName", "PreToolUse")
+            prior = hso.get("additionalContext")
+            hso["additionalContext"] = f"{prior}\n\n{note}" if prior else note
+    _emit(out)
 
 
 def _gated_calls(view: TurnView, route_fn):
@@ -157,10 +172,8 @@ def main() -> None:
             # — gets None and degrades to reviewing its own action.
             gadfly_dir = build_store(cwd).gadfly_dir
             if batch.claim_leader(gadfly_dir, view.batch_id):
-                _emit(
-                    to_hook_output(
-                        _review_batch(view, gated, my_id, action, session, cwd, config)
-                    )
+                _emit_verdict(
+                    _review_batch(view, gated, my_id, action, session, cwd, config), cwd
                 )
                 return
             # CC's command-hook timeout is 600s and fails OPEN on overrun, so the
@@ -172,32 +185,23 @@ def main() -> None:
                 gadfly_dir, view.batch_id, my_id, timeout=wait
             )
             if follower is not None:
-                _emit(to_hook_output(follower))
+                _emit_verdict(follower, cwd)
                 return
             # Follower degrade: wait (≤180s) is already spent, so review with a
             # single attempt — worst case ≈ wait + llm_timeout, inside the hook
             # ceiling pinned in settings.json (which fails OPEN on overrun).
-            _emit(
-                to_hook_output(
-                    _review_one(
-                        action,
-                        session,
-                        cwd,
-                        replace(config, llm_retries=1),
-                        view.messages,
-                    )
-                )
+            _emit_verdict(
+                _review_one(
+                    action, session, cwd, replace(config, llm_retries=1), view.messages
+                ),
+                cwd,
             )
             return
         # Single action: full budget — nothing was spent waiting. Pass view.messages
         # unconditionally — poll_turn populates the conversation even on a batch-poll
         # miss, so the store stays current instead of freezing when the poll times out.
-        _emit(
-            to_hook_output(
-                _review_one(
-                    action, session, cwd, config, view.messages
-                )
-            )
+        _emit_verdict(
+            _review_one(action, session, cwd, config, view.messages), cwd
         )
     except Exception:
         # Review errored (e.g. the model endpoint is down — rare). STEP ASIDE rather

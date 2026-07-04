@@ -102,6 +102,23 @@ class EditLedger:
         """Every file the builder has touched, in first-seen order."""
         return list(self._latest())
 
+    def edits_since(self, mtime: float, *, exclude_suffixes: tuple[str, ...] = (".md",)) -> int:
+        """How many builder edits were recorded after `mtime` (epoch seconds), skipping files
+        with an excluded suffix. Used to gauge codemap staleness — docs (.md) don't count as
+        structural change."""
+        n = 0
+        for r in self._read():
+            f = r.get("file", "")
+            if f.endswith(exclude_suffixes):
+                continue
+            try:
+                when = datetime.fromisoformat(r.get("ts", "")).timestamp()
+            except ValueError:
+                continue
+            if when > mtime:
+                n += 1
+        return n
+
     def diverged(self) -> list[dict]:
         """Tracked files whose CURRENT disk content no longer matches the builder's
         last recorded edit — changed out-of-band since. Each: {file, reason}, where
