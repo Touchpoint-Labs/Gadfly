@@ -10,7 +10,6 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
-[![Tests](https://img.shields.io/badge/tests-215%20passing-brightgreen.svg)](tests)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
 [![Status](https://img.shields.io/badge/status-v1%20dogfooding-orange.svg)](#status)
 [![For Claude Code](https://img.shields.io/badge/for-Claude%20Code-8A2BE2.svg)](https://claude.com/claude-code)
@@ -27,26 +26,12 @@ babysitting a diff.
 
 ## Gadfly in action
 
-```text
- builder   Edit  api/auth.py
-   └ store the JWT in localStorage so the client can read it
- gadfly    QUESTION · architect
-   └ spec.md says tokens must never be reachable from JS. localStorage is readable
-     by any XSS on the page — an httpOnly cookie keeps it off the JS heap. Reconsider?
-
- builder   Edit  billing.py
-   └ for i in range(len(items) - 1): total += items[i].price
- gadfly    BLOCK · code
-   └ off-by-one — the last item is never summed. Use range(len(items)).
-
- builder   Bash  pip install some-orm
- gadfly    SURFACE → you
-   └ this adds an ORM and a data layer your spec doesn't mention — a load-bearing
-     call. Worth deciding: stay on raw SQL, or adopt it?
-
- builder   Read  config.py      ──  allow (silent)
- builder   Bash  pytest -q      ──  allow (silent)
-```
+| The builder's next move | Gadfly | Why |
+|---|---|---|
+| ✏️ `Edit api/auth.py` — *store the JWT in localStorage* | 💬 **question** · architect | spec says tokens must never be JS-reachable; localStorage is XSS-readable — an httpOnly cookie keeps it off the heap. Reconsider? |
+| ✏️ `Edit billing.py` — *`for i in range(len(items) - 1)`* | ⛔ **block** · code | off-by-one — the last item is never summed |
+| ▶️ `Bash pip install some-orm` | ✋ **surface → you** | adds an ORM your spec never mentioned — a load-bearing call. Raw SQL, or adopt it? |
+| 👁️ `Read config.py` · ▶️ `pytest -q` | ✅ **allow** · silent | fine — stays out of the way |
 
 *One loop, four verdicts: it stays silent when things are fine, **questions** a drift,
 **blocks** a real bug, and **surfaces** a genuinely consequential call to you — all before
@@ -132,14 +117,27 @@ Gadfly reasons from a small, layered memory of the supervised project rather tha
 
 | File | Owner | Role |
 |---|---|---|
-| `spec.md` | **You** | The ideal the architect holds the work to |
-| `claude.md` | **You** | Enforced project rules |
-| `codemap.md` | Agent | A live map of the current structure |
+| `spec.md` | **You** — *required* | The vision the architect enforces against, every gate |
+| `claude.md` | **You** — *optional* | Project rules, enforced when present |
+| `codemap.md` | Builder | A live map of the current structure |
 | `decisions.md` | Gadfly | A ledger of load-bearing decisions and why they were made |
 | `memory.md` | Gadfly | Your cross-project style and calibration |
 
-A light pre-build **midwife** pass reads your spec on the first prompt and asks the sharp
-questions you left unanswered — so the work starts from a real spec, not a vague one.
+A light pre-build **midwife** pass reads your `spec.md` on the first prompt and asks the sharp
+questions it leaves unanswered — so you sharpen a real spec before building, not a vague one.
+
+## Spec-driven development that actually holds
+
+Most "spec-driven" workflows write a spec, then drift from it the moment coding starts — it
+becomes a stale doc nobody enforces. Gadfly makes the spec **load-bearing**:
+
+- `gadfly init` **requires** a `spec.md` — no vision, no supervision.
+- The architect measures **every** edit against it — in letter *and* spirit — and catches
+  drift the moment it starts, not in review three hours later.
+- Consequential calls your spec never covered get surfaced to you, and once you accept one it's
+  promoted back into the spec — so it stays the living source of truth, not a fossil.
+
+The spec you write is the spec that gets enforced, turn after turn.
 
 ## You set the altitude
 
@@ -157,25 +155,19 @@ A small, **pure core** wrapped by two adapter boundaries — one that speaks the
 native format, one that speaks to an LLM provider. Both are swappable; the core is
 agent-agnostic, LLM-agnostic, and owns its own normalized state.
 
-```text
-   your coding agent  —  Claude Code (v1)
-        │  native hooks: PreToolUse · PostToolUse · SessionStart · Stop
-        ▼
-   ┌─ AGENT ADAPTER ──────────────────────────────────────────────
-   │  the only code that speaks the agent's native format
-   └────┬─────────────────────────────────────────────────────────
-        │  neutral contract:  event → verdict
-        ▼
-   ┌─ PURE CORE ──────────────────────────────────────────────────
-   │  review(unit) → verdicts    ·    agent-agnostic · LLM-agnostic
-   │  router (Tier-0, free)  ·  architect + code (isolated lenses)
-   │  five-file memory: spec · claude · codemap · decisions · memory
-   └────┬─────────────────────────────────────────────────────────
-        │  provider-neutral client
-        ▼
-   ┌─ LLM PROVIDER ADAPTER ───────────────────────────────────────
-   │  Anthropic (claude -p) in v1
-   └──────────────────────────────────────────────────────────────
+```mermaid
+flowchart TB
+    agent["🧑‍💻 &nbsp;Your coding agent · Claude Code"]
+    adapter["🔌 &nbsp;Agent Adapter<br/><i>the only code that speaks the agent's native format</i>"]
+    core["⚙️ &nbsp;Pure Core — review → verdicts<br/>Tier-0 router · Architect + Code lenses · five-file memory"]
+    llm["🧠 &nbsp;LLM Provider Adapter · Anthropic (claude -p)"]
+    agent -->|"native hooks · PreToolUse · PostToolUse · SessionStart · Stop"| adapter
+    adapter -->|"neutral contract · event → verdict"| core
+    core -->|"provider-neutral client"| llm
+    style agent fill:#161b26,stroke:#4a5568,color:#f0eae6
+    style adapter fill:#1a2230,stroke:#3a5a7a,color:#f0eae6
+    style core fill:#241a33,stroke:#8A48A4,color:#f0eae6
+    style llm fill:#2a1e26,stroke:#EF816F,color:#f0eae6
 ```
 
 See [`spec.md`](spec.md) for the full design.
@@ -185,20 +177,32 @@ See [`spec.md`](spec.md) for the full design.
 ```bash
 pip install git+https://github.com/Touchpoint-Labs/Gadfly.git   # zero deps; PyPI soon
 cd your-project
-gadfly init      # wires the hooks + scaffolds gadfly.toml — conflict-safe, leaves your own hooks
-gadfly status    # confirm it's live
+
+# 1. Write a spec.md — it's required; the architect enforces against it. Sketch the project
+#    with your AI assistant and save it as spec.md. (Optionally add a claude.md of rules.)
+
+# 2. Wire Gadfly in — conflict-safe, leaves any hooks you already have.
+gadfly init
+gadfly status        # confirm it's live
 ```
 
-Then write a `spec.md` at the project root — Gadfly's midwife asks about the gaps on your
-first prompts — and start coding in Claude Code. Gadfly rides your existing access, **no API
-key required.** Tune models, the autonomy dial, and review scope in `gadfly.toml`; pause
-anytime with `gadfly disable` / `gadfly enable`, or remove it cleanly with `gadfly uninstall`.
+Then code in Claude Code as usual. Gadfly rides your existing access — **no API key required.**
+
+### Commands
+
+| Command | |
+|---|---|
+| `gadfly init` | Wire hooks into this folder (a `spec.md` is required); `init global` targets `~/.claude` |
+| `gadfly status` | Check the install is live — actually runs a hook end-to-end |
+| `gadfly config` | Show, get, or set config in `gadfly.toml` (models, autonomy dial, review scope) |
+| `gadfly disable` / `enable` | Pause / resume without touching your settings |
+| `gadfly uninstall` | Remove Gadfly's hooks — leaves any of your own |
 
 ## Status
 
 **v1** — Python 3.12+, zero runtime dependencies, in active dogfooding on Claude Code. Two
 supervisors, pre-execution review, five-file memory, the self-improvement loop, cover-for-other,
-and a one-command install (`gadfly init`) are built and live-tested (215 passing tests).
+and a one-command install (`gadfly init`) are built and live-tested.
 
 ## License
 
