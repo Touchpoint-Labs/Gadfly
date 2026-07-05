@@ -4,11 +4,13 @@ read their context slice from it and core.review() writes the session to it."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .config import Config
 from .core import Reviewers
-from .providers.llm import ClaudeCliProvider, LLMProvider
+from .providers.anthropic_api import AnthropicAPIProvider
+from .providers.llm import ClaudeCliProvider, LLMError, LLMProvider
 from .router import route
 from .state.session import SessionStore
 from .supervisors import (
@@ -21,35 +23,54 @@ from .supervisors import (
 )
 
 
-def build_provider(config: Config) -> LLMProvider:
-    if config.provider == "claude_cli":
+def _make_provider(name: str, config: Config) -> LLMProvider:
+    if name == "claude_cli":
         return ClaudeCliProvider(timeout=config.llm_timeout)
-    raise ValueError(f"provider {config.provider!r} is not implemented in v1")
+    if name == "anthropic_api":
+        key = os.environ.get(config.anthropic_api.api_key_env, "")
+        if not key:
+            raise LLMError(
+                f"provider anthropic_api needs ${config.anthropic_api.api_key_env} set"
+            )
+        return AnthropicAPIProvider(key, timeout=config.llm_timeout)
+    raise ValueError(f"provider {name!r} is not implemented")
+
+
+def build_provider(config: Config) -> LLMProvider:
+    """The global-default provider. Used by the text helpers (extractor, midwife,
+    compactor, digest); the supervisors resolve their own via provider_for()."""
+    return _make_provider(config.provider, config)
+
+
+def provider_for(config: Config, role: str) -> LLMProvider:
+    """The provider for one supervisor role — its [providers] override, else the default."""
+    return _make_provider(getattr(config.providers, role) or config.provider, config)
 
 
 def build_store(workspace: Path) -> SessionStore:
     return SessionStore(Path(workspace) / ".gadfly")
 
 
-def build_reviewers(
-    config: Config, provider: LLMProvider, workspace: Path, store: SessionStore
-) -> Reviewers:
+def build_reviewers(config: Config, workspace: Path, store: SessionStore) -> Reviewers:
+    # Each supervisor gets the provider its [providers] override picks (else the default),
+    # so architect / code / triage can run on different backends.
     # A disabled reviewer is None; the survivor runs its solo prompt to cover the gap.
     code = None if config.disable_code_reviewer else make_code_reviewer(
-        provider, config.models.code, workspace, store,
+        provider_for(config, "code"), config.models.code, workspace, store,
         attempts=config.llm_retries, solo=config.disable_architect,
         convo_tail_budget=config.convo_tail_budget,
     )
     architect = None if config.disable_architect else make_architect(
-        provider, config.models.architect, workspace, store, config.autonomy,
-        attempts=config.llm_retries, solo=config.disable_code_reviewer,
+        provider_for(config, "architect"), config.models.architect, workspace, store,
+        config.autonomy, attempts=config.llm_retries, solo=config.disable_code_reviewer,
         convo_tail_budget=config.convo_tail_budget,
     )
     return Reviewers(
         code=code,
         architect=architect,
         safety_triage=make_safety_triage(
-            provider, config.models.triage, store, attempts=config.llm_retries
+            provider_for(config, "triage"), config.models.triage, store,
+            attempts=config.llm_retries,
         ),
     )
 

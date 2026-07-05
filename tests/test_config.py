@@ -34,6 +34,28 @@ def test_partial_override(tmp_path):
     assert c.models.code == "claude-sonnet-5"  # untouched default
 
 
+def test_per_supervisor_providers(tmp_path):
+    p = tmp_path / "gadfly.toml"
+    p.write_text(
+        'provider = "claude_cli"\n\n'
+        "[providers]\n"
+        'architect = "anthropic_api"\n\n'
+        "[anthropic_api]\n"
+        'api_key_env = "MY_KEY"\n'
+    )
+    c = load(p)
+    assert c.providers.architect == "anthropic_api"
+    assert c.providers.code is None  # unset → falls back to the global provider
+    assert c.anthropic_api.api_key_env == "MY_KEY"
+
+
+def test_unknown_per_supervisor_provider_raises(tmp_path):
+    p = tmp_path / "gadfly.toml"
+    p.write_text("[providers]\ncode = \"gpt5\"\n")
+    with pytest.raises(ValueError):
+        load(p)
+
+
 def test_unknown_provider_raises(tmp_path):
     p = tmp_path / "gadfly.toml"
     p.write_text('provider = "gpt5"\n')

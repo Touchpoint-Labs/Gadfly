@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Optional
 
-PROVIDERS = ("claude_cli", "anthropic_api")  # only claude_cli is implemented in v1
+PROVIDERS = ("claude_cli", "anthropic_api")  # subscription CLI | metered Messages API
 AUTONOMY = ("autonomous", "balanced", "collaborative")  # class-3 surfacing dial
 TEST_REVIEW = ("both", "code", "off")  # how test-file edits are reviewed
 
@@ -23,6 +23,21 @@ class Models:
     code: str = "claude-sonnet-5"
     triage: str = "claude-haiku-4-5"
     feedback: str = "claude-sonnet-5"  # idle-time correction extractor
+
+
+@dataclass(frozen=True)
+class Providers:
+    """Per-supervisor provider override. None → the global `provider`. Lets each
+    reviewer run on a different backend (e.g. architect on the API, code on the CLI)."""
+
+    architect: Optional[str] = None
+    code: Optional[str] = None
+    triage: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class AnthropicAPI:
+    api_key_env: str = "ANTHROPIC_API_KEY"  # env var holding the key (never the key itself)
 
 
 @dataclass(frozen=True)
@@ -38,6 +53,8 @@ class Config:
     provider: str = "claude_cli"
     autonomy: str = "balanced"
     models: Models = field(default_factory=Models)
+    providers: Providers = field(default_factory=Providers)  # per-supervisor overrides
+    anthropic_api: AnthropicAPI = field(default_factory=AnthropicAPI)
     memory: MemoryBudgets = field(default_factory=MemoryBudgets)
     llm_timeout: int = 60  # seconds per LLM call
     llm_retries: int = 2  # attempts on transient errors
@@ -60,17 +77,38 @@ def load(path: Optional[Path] = None) -> Config:
         with open(path, "rb") as f:
             data = tomllib.load(f)
     models = replace(Models(), **_subset(data.get("models", {}) or {}, Models))
+    providers = replace(
+        Providers(), **_subset(data.get("providers", {}) or {}, Providers)
+    )
+    anthropic_api = replace(
+        AnthropicAPI(), **_subset(data.get("anthropic_api", {}) or {}, AnthropicAPI)
+    )
     memory = replace(
         MemoryBudgets(), **_subset(data.get("memory", {}) or {}, MemoryBudgets)
     )
     top = _subset(data, Config)
-    top.pop("models", None)
-    top.pop("memory", None)
-    cfg = replace(Config(models=models, memory=memory), **top)
+    for k in ("models", "providers", "anthropic_api", "memory"):
+        top.pop(k, None)
+    cfg = replace(
+        Config(
+            models=models,
+            providers=providers,
+            anthropic_api=anthropic_api,
+            memory=memory,
+        ),
+        **top,
+    )
     if cfg.provider not in PROVIDERS:
         raise ValueError(
             f"unknown provider {cfg.provider!r}; expected one of {PROVIDERS}"
         )
+    for f in fields(Providers):
+        name = getattr(cfg.providers, f.name)
+        if name is not None and name not in PROVIDERS:
+            raise ValueError(
+                f"unknown provider {name!r} for providers.{f.name}; "
+                f"expected one of {PROVIDERS}"
+            )
     if cfg.autonomy not in AUTONOMY:
         raise ValueError(
             f"unknown autonomy {cfg.autonomy!r}; expected one of {AUTONOMY}"

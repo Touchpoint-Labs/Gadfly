@@ -27,7 +27,7 @@ from gadfly.adapters.claudecode.verdict import defer, to_hook_output
 from gadfly.config import Config, load
 from gadfly.contracts import Decision, InterventionEvent, Verdict
 from gadfly.core import review
-from gadfly.factory import build_provider, build_reviewers, build_route_fn, build_store
+from gadfly.factory import build_reviewers, build_route_fn, build_store
 from gadfly.router import managed_doc_verdict
 from gadfly.state import codemap
 from gadfly.worker import maybe_start_digest_worker, maybe_start_feedback_worker
@@ -69,8 +69,7 @@ def _review_one(action, session: str, cwd: str, config: Config, messages) -> Ver
     store.append_convo(session, messages)
     maybe_start_digest_worker(Path(cwd), session)
     maybe_start_feedback_worker(Path(cwd), session)
-    provider = build_provider(config)
-    reviewers = build_reviewers(config, provider, cwd, store)
+    reviewers = build_reviewers(config, cwd, store)
     event = InterventionEvent(
         unit=[action], workspace=cwd, session=session, messages=messages
     )
@@ -88,8 +87,7 @@ def _review_batch(
     store.append_convo(session, view.messages)
     maybe_start_digest_worker(Path(cwd), session)
     maybe_start_feedback_worker(Path(cwd), session)
-    provider = build_provider(config)
-    reviewers = build_reviewers(config, provider, cwd, store)
+    reviewers = build_reviewers(config, cwd, store)
     ids = [i for i, _ in gated]
     actions = [a for _, a in gated]
     event = InterventionEvent(

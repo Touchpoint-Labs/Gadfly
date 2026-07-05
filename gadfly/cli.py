@@ -44,6 +44,14 @@ autonomy = "balanced"
 architect = "claude-opus-4-8"  # the Socratic architect: drift, design, vision
 code = "claude-sonnet-5"       # the code skeptic: bugs, edges, hallucinated APIs
 triage = "claude-haiku-4-5"    # fast command-safety triage
+
+# Optional: run a supervisor on a different backend than the global `provider`.
+# Omit a role to keep it on the default. "anthropic_api" reads a key from the env
+# var named below (never store the key in this file).
+# [providers]
+# architect = "anthropic_api"
+# [anthropic_api]
+# api_key_env = "ANTHROPIC_API_KEY"
 '''
 
 
