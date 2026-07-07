@@ -36,6 +36,22 @@ def test_edits_since_counts_newer_and_skips_docs(tmp_path):
     assert EditLedger(g).edits_since(cutoff) == 2
 
 
+def test_record_skips_out_of_workspace_files(tmp_path):
+    # a /tmp scratch edit isn't project authorship — it must not enter the ledger (else it
+    # inflates codemap-staleness and, once cleaned up, reads as a human deletion to feedback)
+    import shutil
+    import tempfile
+    from pathlib import Path
+    led = EditLedger(tmp_path / ".gadfly")
+    (tmp_path / "real.py").write_text("x")
+    led.record("s", "Write", str(tmp_path / "real.py"))          # in-workspace → recorded
+    scratch = Path(tempfile.mkdtemp()) / "scratch.py"
+    scratch.write_text("y")
+    led.record("s", "Write", str(scratch))                       # out-of-workspace → skipped
+    assert led.tracked_files() == [str((tmp_path / "real.py").resolve())]
+    shutil.rmtree(scratch.parent, ignore_errors=True)
+
+
 # --- pending() + nudge(), mtime-relative to codemap.md -----------------------
 
 def test_pending_counts_edits_after_codemap(tmp_path):

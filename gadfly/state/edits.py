@@ -70,8 +70,13 @@ class EditLedger:
         PostToolUse, after the tool ran — so it captures exactly what the builder's
         edit produced: a hash (for cheap divergence checks) and the full content (so a
         later human edit of the same file can be diffed against the builder's version).
-        A file with nothing on disk to fingerprint is skipped."""
+        Out-of-workspace edits (e.g. /tmp scratch files) aren't project authorship and are
+        skipped — otherwise a scratch file the OS later cleans up reads as a human 'deletion'
+        (feeding the extractor) and inflates codemap-staleness. A file with nothing on disk to
+        fingerprint is skipped."""
         p = Path(file).resolve()
+        if not p.is_relative_to(self.dir.resolve().parent):
+            return
         try:
             content = p.read_bytes()
         except OSError:
