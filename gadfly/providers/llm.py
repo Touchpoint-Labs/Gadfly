@@ -62,6 +62,9 @@ def complete_with_retry(
     raise last
 
 
+_TOOL_CAP = 5  # a review may use at most this many tools before it must produce a verdict
+
+
 class ClaudeCliProvider:
     """Rides the user's Claude Code subscription via `claude -p` — no API key.
 
@@ -75,15 +78,17 @@ class ClaudeCliProvider:
 
     def _tool_args(self, tools: bool) -> list[str]:
         if tools:
-            # Reviewers are read-only: mutating tools and delegation/task tools are disallowed;
-            # Read/search remain available for bounded context gathering.
+            # Code reviewer / solo reviewers: mutating & delegation tools disallowed; Read/search
+            # stay for the rare "must verify a fact" review (prompt-steered to be rare, capped at 5).
             return [
                 "--disallowedTools",
                 "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,TaskCreate",
             ]
-        # Pure text calls (midwife, extractor, compactor, summarizer): content is in the
-        # prompt; no filesystem access needed or wanted.
-        return ["--allowedTools", ""]
+        # No-tool calls (normal architect + text helpers): `--tools ""` disables ALL tools
+        # (verified). A --disallowedTools denylist is NOT enough — models route around it via MCP
+        # tools; and `--allowedTools ""` doesn't restrict at all. StructuredOutput (the --json-schema
+        # verdict channel) survives `--tools ""`.
+        return ["--tools", ""]
 
     def _complete_schema_streaming(self, cmd: list[str], prompt: str) -> str:
         # stderr → a temp file, never a PIPE: streaming drains only stdout, so an undrained
@@ -114,6 +119,7 @@ class ClaudeCliProvider:
             proc.stdin.close()
             threading.Thread(target=_pump, daemon=True).start()
             deadline = time.monotonic() + self._timeout
+            tool_calls = 0
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -130,11 +136,18 @@ class ClaudeCliProvider:
                     continue
                 msg = event.get("message") or {}
                 for item in msg.get("content") or []:
-                    if (
-                        item.get("type") == "tool_use"
-                        and item.get("name") == "StructuredOutput"
-                    ):
+                    if item.get("type") != "tool_use":
+                        continue
+                    if item.get("name") == "StructuredOutput":
                         return json.dumps(item.get("input") or {})
+                    tool_calls += 1
+                    if tool_calls > _TOOL_CAP:
+                        # Runaway backstop (prompt steers tools to be rare). Permanent, not
+                        # transient: retrying re-spends the budget on a model already ignoring
+                        # the instruction. Propagates → the review steps aside (D2), never allows.
+                        raise LLMError(
+                            f"review used more than {_TOOL_CAP} tools without a verdict"
+                        )
                 if event.get("type") == "result":
                     if event.get("is_error"):
                         raise LLMTransientError(

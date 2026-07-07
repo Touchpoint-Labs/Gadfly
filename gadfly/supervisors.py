@@ -196,8 +196,12 @@ def make_architect(provider: LLMProvider, model: str, workspace, store: SessionS
             cross = learned.read_cross_project(cross_path)
             system, user = architect_context(mem, ledger, store, event, subset, mode, cross,
                                              solo=solo, convo_tail_budget=convo_tail_budget)
+            # Normal architect gets no tools — it reasons at altitude from the spec/codemap/
+            # decisions/change it's given (verified: it never reaches for them). The solo
+            # architect covers the code lane, so it keeps reads for the rare verification.
             raw = complete_with_retry(provider, system=system, prompt=user, model=model,
-                                      schema=ARCHITECT_VERDICT_SCHEMA, attempts=attempts)
+                                      schema=ARCHITECT_VERDICT_SCHEMA, attempts=attempts,
+                                      tools=solo)
             return parse_verdicts(raw)
         return _aligned_review(actions, call_once)
 
@@ -215,7 +219,9 @@ def make_safety_triage(provider: LLMProvider, model: str, store: SessionStore, a
         if convo:
             prompt += "\n\nRecent conversation:\n" + "\n".join(r.get("text", "") for r in convo)
         prompt += "\n\nREVIEW or ALLOW?"
-        raw = complete_with_retry(provider, system=system, prompt=prompt, model=model, attempts=attempts)
+        # Cheap REVIEW/ALLOW classifier — no tools (it decides from the command + convo).
+        raw = complete_with_retry(provider, system=system, prompt=prompt, model=model,
+                                  attempts=attempts, tools=False)
         u = raw.upper()
         return ("REVIEW" in u) or ("ALLOW" not in u)
 

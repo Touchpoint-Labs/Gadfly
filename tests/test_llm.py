@@ -226,3 +226,35 @@ def test_streaming_survives_large_stderr_without_deadlock():
     p = ClaudeCliProvider(timeout=10)
     out = p._complete_schema_streaming([sys.executable, "-c", script], "x")
     assert json.loads(out) == {"ok": True}
+
+
+def test_cli_tools_off_uses_tools_empty(monkeypatch):
+    # tools=False must genuinely disable tools via `--tools ""` — NOT `--allowedTools ""`
+    # (which claude -p treats as no filter, verified in-session).
+    commands = []
+
+    def run(cmd, **kw):
+        commands.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"is_error": False, "result": "ok"}), stderr=""
+        )
+
+    monkeypatch.setattr(llm.subprocess, "run", run)
+    ClaudeCliProvider().complete(system="s", prompt="p", model="m", tools=False)
+    cmd = commands[0]
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert "--allowedTools" not in cmd
+
+
+def test_review_exceeds_tool_cap_is_permanent():
+    # a reviewer that keeps calling tools past the 5-cap → permanent LLMError (→ step-aside),
+    # never retried and never a silent allow.
+    script = (
+        "import sys, json; "
+        "m = json.dumps({'message': {'content': [{'type': 'tool_use', 'name': 'Read', 'input': {}}]}}); "
+        "[sys.stdout.write(m + chr(10)) or sys.stdout.flush() for _ in range(6)]"
+    )
+    p = ClaudeCliProvider(timeout=10)
+    with pytest.raises(LLMError) as ei:
+        p._complete_schema_streaming([sys.executable, "-c", script], "x")
+    assert not isinstance(ei.value, LLMTransientError)
