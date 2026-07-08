@@ -9,7 +9,7 @@
 — Socrates, in Plato's *Apology*
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
 [![For Claude Code](https://img.shields.io/badge/for-Claude%20Code-8A2BE2.svg)](https://claude.com/claude-code)
 
@@ -195,12 +195,6 @@ Then code in Claude Code as usual. Gadfly rides your existing access — **no AP
 | `gadfly config` | Show, get, or set config in `gadfly.toml` (models, autonomy dial, review scope) |
 | `gadfly disable` / `enable` | Pause / resume without touching your settings |
 | `gadfly uninstall` | Remove Gadfly's hooks — leaves any of your own |
-
-## Status
-
-**v1** — Python 3.12+, zero runtime dependencies, in active dogfooding on Claude Code. Two
-supervisors, pre-execution review, five-file memory, the self-improvement loop, cover-for-other,
-and a one-command install (`gadfly init`) are built and live-tested.
 
 ## License
 
