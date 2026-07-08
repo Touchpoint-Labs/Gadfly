@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Touchpoint-Labs/Gadfly/main/assets/gadfly_hero.png" alt="Gadfly — a Socratic supervisor in your AI coding agent's loop" width="760">
-
-# Gadfly
+<img src="assets/gadfly_hero.png" alt="Gadfly — a Socratic supervisor in your AI coding agent's loop" width="760">
 
 **A Socratic supervision layer for AI coding agents.**
 
