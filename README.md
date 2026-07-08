@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/Touchpoint-Labs/Gadfly/main/assets/gadfly_hero.png" alt="Gadfly — a Socratic supervisor in your AI coding agent's loop" width="760">
+
 # Gadfly
 
 **A Socratic supervision layer for AI coding agents.**
@@ -11,7 +13,6 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](pyproject.toml)
 [![Dependencies](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
-[![Status](https://img.shields.io/badge/status-v1%20dogfooding-orange.svg)](#status)
 [![For Claude Code](https://img.shields.io/badge/for-Claude%20Code-8A2BE2.svg)](https://claude.com/claude-code)
 
 </div>
