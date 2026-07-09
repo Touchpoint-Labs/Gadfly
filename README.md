@@ -150,39 +150,16 @@ An **autonomy dial** controls how often Gadfly involves you:
 
 Irreversible operations always ask, regardless of the dial.
 
-## Architecture
-
-A small, **pure core** wrapped by two adapter boundaries: one speaks the host agent's
-native format, the other speaks to an LLM provider. Both are swappable; the core is
-agent-agnostic, LLM-agnostic, and owns its own normalized state.
-
-```mermaid
-flowchart TB
-    agent["🧑‍💻 &nbsp;Your coding agent<br/>Claude Code"]
-    adapter["🔌 &nbsp;Agent Adapter"]
-    core["⚙️ &nbsp;Pure Core<br/>Architect + Code supervisors · memory"]
-    llm["🧠 &nbsp;LLM Provider<br/>Claude (subscription or API)"]
-    agent -->|"every tool call"| adapter
-    adapter -->|"review → verdict"| core
-    core --> llm
-    style agent fill:#161b26,stroke:#4a5568,color:#f0eae6
-    style adapter fill:#1a2230,stroke:#3a5a7a,color:#f0eae6
-    style core fill:#241a33,stroke:#8A48A4,color:#f0eae6
-    style llm fill:#2a1e26,stroke:#EF816F,color:#f0eae6
-```
-
-See [`spec.md`](spec.md) for the full design.
-
-## Quickstart *(v1: Claude Code)*
+## Quickstart
 
 ```bash
-pip install git+https://github.com/Touchpoint-Labs/Gadfly.git   # zero deps; PyPI soon
+pip install gadfly   # zero dependencies
 cd your-project
 
-# 1. Write a spec.md — it's required; the architect enforces against it. Sketch the project
+# 1. Write a spec.md. It's required; the architect enforces against it. Sketch the project
 #    with your AI assistant and save it as spec.md. (Optionally add a claude.md of rules.)
 
-# 2. Wire Gadfly in — conflict-safe, leaves any hooks you already have.
+# 2. Wire Gadfly in. Conflict-safe, and leaves any hooks you already have.
 gadfly init
 gadfly status        # confirm it's live
 ```
@@ -197,7 +174,7 @@ reviewer on your subscription. Set this per role in `gadfly.toml`.
 | Command | |
 |---|---|
 | `gadfly init` | Wire hooks into this folder (a `spec.md` is required); `init global` targets `~/.claude` |
-| `gadfly status` | Check the install is live — actually runs a hook end-to-end |
+| `gadfly status` | Check the install is live (it actually runs a hook end to end) |
 | `gadfly config` | Show, get, or set config in `gadfly.toml` (models, autonomy dial, review scope) |
 | `gadfly disable` / `enable` | Pause / resume without touching your settings |
 | `gadfly uninstall` | Remove Gadfly's hooks (leaves any of your own) |
@@ -239,6 +216,29 @@ A few more knobs, all optional:
 
 Timing and retry knobs (`llm_timeout`, `llm_retries`, `poll_timeout`) exist as well, but rarely
 need changing.
+
+## Architecture
+
+A small, **pure core** wrapped by two adapter boundaries: one speaks the host agent's
+native format, the other speaks to an LLM provider. Both are swappable; the core is
+agent-agnostic, LLM-agnostic, and owns its own normalized state.
+
+```mermaid
+flowchart TB
+    agent["🧑‍💻 &nbsp;Your coding agent<br/>Claude Code"]
+    adapter["🔌 &nbsp;Agent Adapter"]
+    core["⚙️ &nbsp;Pure Core<br/>Architect + Code supervisors · memory"]
+    llm["🧠 &nbsp;LLM Provider<br/>Claude (subscription or API)"]
+    agent -->|"every tool call"| adapter
+    adapter -->|"review → verdict"| core
+    core --> llm
+    style agent fill:#161b26,stroke:#4a5568,color:#f0eae6
+    style adapter fill:#1a2230,stroke:#3a5a7a,color:#f0eae6
+    style core fill:#241a33,stroke:#8A48A4,color:#f0eae6
+    style llm fill:#2a1e26,stroke:#EF816F,color:#f0eae6
+```
+
+See [`spec.md`](spec.md) for the full design.
 
 ## Roadmap
 
