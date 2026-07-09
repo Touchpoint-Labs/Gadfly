@@ -42,10 +42,10 @@ class AnthropicAPI:
 
 @dataclass(frozen=True)
 class MemoryBudgets:
-    spec: int = 18000
-    claude: int = 15000
-    memory: int = 12000
-    codemap: int = 15000
+    spec: int = 30000
+    claude: int = 24000
+    memory: int = 20000
+    codemap: int = 24000
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ class Config:
     providers: Providers = field(default_factory=Providers)  # per-supervisor overrides
     anthropic_api: AnthropicAPI = field(default_factory=AnthropicAPI)
     memory: MemoryBudgets = field(default_factory=MemoryBudgets)
-    llm_timeout: int = 60  # seconds per LLM call
+    llm_timeout: int = 240  # seconds per LLM call (measured architect reviews reach ~240s on big models)
     llm_retries: int = 2  # attempts on transient errors
     poll_timeout: float = 3.0  # seconds to wait for the transcript to flush at the gate
     convo_tail_budget: int = 24000  # chars of recent conversation a supervisor sees
