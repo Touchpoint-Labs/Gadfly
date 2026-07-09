@@ -115,9 +115,11 @@ class ClaudeCliProvider:
 
         try:
             assert proc.stdin is not None
+            # Start draining stdout before writing stdin: a large prompt can outrun the
+            # pipe buffer, and a child that emits before we drain would otherwise deadlock.
+            threading.Thread(target=_pump, daemon=True).start()
             proc.stdin.write(prompt)
             proc.stdin.close()
-            threading.Thread(target=_pump, daemon=True).start()
             deadline = time.monotonic() + self._timeout
             tool_calls = 0
             while True:
