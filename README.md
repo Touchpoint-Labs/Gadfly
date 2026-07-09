@@ -57,15 +57,13 @@ stays honest without you reading every line.
 
 At every tool call, **before it executes** (`PreToolUse`), Gadfly reviews the action with
 two independent, read-only supervisors. A deterministic first pass auto-allows reads and safe
-commands for free, so the LLMs only wake for things that matter. Each review returns one of
-four verdicts:
+commands for free, so the LLMs only wake for things that matter.
 
-| Verdict | What it means |
-|---|---|
-| ✅ **allow** | silent, stays out of your way (the common case) |
-| 💬 **question** | a pointed note back to the builder that makes it reconsider, mid-flight |
-| ✋ **surface** | pauses and asks *you*, for a genuinely consequential, undiscussed call |
-| ⛔ **block** | stops an action that violates your spec or carries a real bug |
+Each review lands on one of the four verdicts above. An **allow** is silent and stays out of
+your way, the common case. A **question** sends a pointed note back to the agent that makes it
+reconsider mid-flight. A **surface** pauses the build and asks *you*, for a genuinely
+consequential call your spec never settled. A **block** stops an action that violates your spec
+or carries a real bug.
 
 ## Why you'll want it
 
@@ -123,7 +121,7 @@ Gadfly reasons from a small, layered memory of the supervised project rather tha
 | `spec.md` | **You** *(required)* | The vision the architect enforces against, every gate |
 | `claude.md` | **You** *(optional)* | Project rules, enforced when present |
 | `codemap.md` | Builder | A live map of the current structure |
-| `decisions.md` | Gadfly | A ledger of load-bearing decisions and why they were made |
+| `decisions.md` | Gadfly | A ledger of the decisions that shape the project, and why they were made |
 | `memory.md` | Gadfly | Your cross-project style and calibration |
 
 Gadfly enforces that split: the agent can read all of these files but never writes to `spec.md`,
@@ -136,7 +134,7 @@ questions it leaves unanswered, so you sharpen a real spec before building inste
 ## Spec-driven development that actually holds
 
 Most "spec-driven" workflows write a spec, then drift from it the moment coding starts, and it
-becomes a stale doc nobody enforces. Gadfly makes the spec **load-bearing**:
+becomes a stale doc nobody enforces. Gadfly makes the spec **binding**:
 
 - `gadfly init` **requires** a `spec.md`. Without one there's nothing to enforce.
 - The architect measures **every** edit against it, in letter *and* spirit, and catches
