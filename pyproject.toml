@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gadfly"
+name = "gadfly-ai"
 version = "0.1.0"
 description = "Socratic supervision layer for AI coding agents"
 requires-python = ">=3.11"

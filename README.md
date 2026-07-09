@@ -83,8 +83,8 @@ four verdicts:
 - **It learns you.** Correct the agent's code and Gadfly notices: an idle-time loop distills
   your out-of-band edits into durable rules, so the same correction never has to happen
   twice. It calibrates to your style and gets sharper the more you use it.
-- **Socratic, not bureaucratic.** Its main move is a question, not a block. It asks the thing
-  that leads the agent to find the problem itself, and blocks only when it has to.
+- **Socratic, not bureaucratic.** Its first move is a question that leads the agent to spot the
+  problem itself. It blocks only when it has to.
 
 ## The two supervisors
 
@@ -126,6 +126,10 @@ Gadfly reasons from a small, layered memory of the supervised project rather tha
 | `decisions.md` | Gadfly | A ledger of load-bearing decisions and why they were made |
 | `memory.md` | Gadfly | Your cross-project style and calibration |
 
+Gadfly enforces that split: the agent can read all of these files but never writes to `spec.md`,
+`claude.md`, or `decisions.md` directly. Those changes go through you or through Gadfly, never the
+agent itself.
+
 A light pre-build **midwife** pass reads your `spec.md` on the first prompt and asks the sharp
 questions it leaves unanswered, so you sharpen a real spec before building instead of a vague one.
 
@@ -152,8 +156,10 @@ Irreversible operations always ask, regardless of the dial.
 
 ## Quickstart
 
+In v1, Gadfly supervises only Claude Code, so you'll need it installed first. Then:
+
 ```bash
-pip install gadfly   # zero dependencies
+pip install gadfly-ai   # zero dependencies
 cd your-project
 
 # 1. Write a spec.md. It's required; the architect enforces against it. Sketch the project
@@ -209,10 +215,11 @@ A few more knobs, all optional:
   mode. You can't disable both.
 - `test_review` sets how edits to test files are reviewed: `both` supervisors, `code` only (the
   default), or `off`.
-- `auto_allow_docs` is `true` by default, which skips review of documentation (`.md`) edits. Set
-  it to `false` to have the architect review those too.
+- `auto_allow_docs` is `true` by default, which skips review of prose docs (`.md`, `.rst`, `.txt`).
+  Set it to `false` to have the architect review those too.
 - `[memory]` sets a character budget per memory file (`spec`, `claude`, `codemap`, `memory`). When
-  a file grows past its budget Gadfly compacts it, and `0` turns compaction off for that file.
+  a file grows past its budget Gadfly compacts it. For the files you own it never rewrites silently;
+  it proposes a shorter version and asks first. Set a budget to `0` to turn compaction off.
 
 Timing and retry knobs (`llm_timeout`, `llm_retries`, `poll_timeout`) exist as well, but rarely
 need changing.

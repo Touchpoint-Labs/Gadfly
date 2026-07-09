@@ -1,6 +1,6 @@
 """Gadfly command-line interface — the neutral shell.
 
-`pip install gadfly` exposes the `gadfly` command (see pyproject `[project.scripts]`).
+`pip install gadfly-ai` exposes the `gadfly` command (see pyproject `[project.scripts]`).
 Agent-agnostic commands (config, disable/enable, version) live here; agent-specific
 install / status / hook logic lives in the Claude Code adapter
 (adapters/claudecode/install.py), so supporting another host agent is a new adapter, not a
