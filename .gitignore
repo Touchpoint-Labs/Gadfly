@@ -8,8 +8,9 @@ venv/
 build/
 dist/
 
-# Gadfly runtime state, live-test scratch, and the builder's local design/build doc
+# Gadfly runtime state, local config, live-test scratch, and the builder's local docs
 .gadfly/
+gadfly.toml
 livetest/
 CLAUDE.md
 codemap.md
