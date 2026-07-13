@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from gadfly.adapters.claudecode.install import is_disabled
+from gadfly.adapters.claudecode.install import find_workspace, is_disabled
 from gadfly.adapters.claudecode.normalize import normalize
 from gadfly.contracts import ActionType
 from gadfly.state.edits import EditLedger
@@ -47,7 +47,7 @@ def main() -> None:
         action = normalize(data.get("tool_name", ""), data.get("tool_input") or {})
         if action is None or action.type not in (ActionType.EDIT, ActionType.CREATE) or not action.target:
             return
-        cwd = data.get("cwd") or "."
+        cwd = str(find_workspace(data.get("cwd")))
         if is_disabled(cwd):
             return  # disabled: fully off — the ledger pauses too; `enable` re-baselines
         session = data.get("session_id", "unknown")

@@ -111,3 +111,25 @@ def test_disabled_sentinel(tmp_path):
     d.parent.mkdir(parents=True)
     d.write_text("off")
     assert cc.is_disabled(tmp_path)
+
+
+# --- workspace discovery: hooks must not trust the session's wandering cwd ---
+
+def test_find_workspace_ascends_to_gadfly_toml(tmp_path):
+    root = tmp_path / "proj"
+    (root / "app" / "src").mkdir(parents=True)
+    (root / "gadfly.toml").write_text("")
+    assert cc.find_workspace(root / "app" / "src") == root.resolve()
+
+
+def test_find_workspace_falls_back_to_cwd_without_toml(tmp_path):
+    d = tmp_path / "plain"
+    d.mkdir()
+    assert cc.find_workspace(d) == d.resolve()
+
+
+def test_find_workspace_from_inside_state_dir(tmp_path):
+    root = tmp_path / "proj"
+    (root / ".gadfly").mkdir(parents=True)
+    (root / "gadfly.toml").write_text("")
+    assert cc.find_workspace(root / ".gadfly") == root.resolve()

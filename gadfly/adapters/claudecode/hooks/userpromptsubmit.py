@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-from gadfly.adapters.claudecode.install import is_disabled
+from gadfly.adapters.claudecode.install import find_workspace, is_disabled
 from gadfly.config import load
 from gadfly.factory import build_midwife, build_provider
 from gadfly.state.memory import ProjectMemory
@@ -35,7 +35,7 @@ def main() -> None:
         return
     try:
         data = json.load(sys.stdin)
-        cwd = Path(data.get("cwd") or ".")
+        cwd = find_workspace(data.get("cwd"))
         if is_disabled(cwd):
             return
         gadfly_dir = cwd / ".gadfly"

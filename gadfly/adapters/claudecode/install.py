@@ -24,6 +24,18 @@ from pathlib import Path
 # The gate's registered ceiling; the pretooluse clamp keeps retries x timeout under it.
 PRETOOLUSE_TIMEOUT = 600
 
+
+def find_workspace(cwd) -> Path:
+    """Nearest ancestor (including cwd) containing gadfly.toml — the workspace root.
+    Hooks receive the session's CURRENT directory, which follows the builder's `cd`;
+    trusting it verbatim fractures state into nested .gadfly dirs and drops spec.md
+    from review context. Falls back to cwd when no gadfly.toml is found."""
+    start = Path(cwd or ".").resolve()
+    for p in (start, *start.parents):
+        if (p / "gadfly.toml").is_file():
+            return p
+    return start
+
 # CC event -> (matcher | None, timeout seconds | None). Ceilings are sized to each
 # hook's legitimate work: Stop and SessionStart run inline LLM passes (feedback
 # extraction, memory compaction) that can take up to llm_timeout each.
