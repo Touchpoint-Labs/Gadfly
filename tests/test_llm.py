@@ -211,7 +211,7 @@ def test_streaming_times_out_on_silent_hang():
     p = ClaudeCliProvider(timeout=0.5)
     start = time.monotonic()
     with pytest.raises(LLMTransientError):
-        p._complete_schema_streaming([sys.executable, "-c", "import time; time.sleep(30)"], "x")
+        p._complete_schema_streaming([sys.executable, "-c", "import time; time.sleep(30)"], "x", {"type": "object"})
     assert time.monotonic() - start < 5   # tripped by the 0.5s deadline, not the 30s sleep
 
 
@@ -224,7 +224,7 @@ def test_streaming_survives_large_stderr_without_deadlock():
         f"sys.stdout.write({result!r} + chr(10)); sys.stdout.flush()"
     )
     p = ClaudeCliProvider(timeout=10)
-    out = p._complete_schema_streaming([sys.executable, "-c", script], "x")
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
     assert json.loads(out) == {"ok": True}
 
 
@@ -256,5 +256,44 @@ def test_review_exceeds_tool_cap_is_permanent():
     )
     p = ClaudeCliProvider(timeout=10)
     with pytest.raises(LLMError) as ei:
-        p._complete_schema_streaming([sys.executable, "-c", script], "x")
+        p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
     assert not isinstance(ei.value, LLMTransientError)
+
+
+# --- schema-fumble resilience: unwrap wrappers, skip garbage, retry on empty ---
+
+_VERDICTS_SCHEMA = {
+    "type": "object",
+    "required": ["verdicts"],
+    "properties": {"verdicts": {"type": "array"}},
+    "additionalProperties": False,
+}
+
+
+def test_nested_wrapper_payload_is_unwrapped():
+    # models sometimes wrap the payload in the tool name; the provider must unwrap it
+    line = json.dumps({"message": {"content": [{"type": "tool_use", "name": "StructuredOutput",
+                                                "input": {"StructuredOutput": {"verdicts": []}}}]}})
+    script = f"import sys; sys.stdout.write({line!r} + chr(10)); sys.stdout.flush()"
+    p = ClaudeCliProvider(timeout=10)
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x", _VERDICTS_SCHEMA)
+    assert json.loads(out) == {"verdicts": []}
+
+
+def test_nonconforming_payload_is_skipped_for_valid_result():
+    # a payload CC rejected must not be accepted; the valid result event that follows wins
+    bad = json.dumps({"message": {"content": [{"type": "tool_use", "name": "StructuredOutput",
+                                               "input": {"decision": "allow"}}]}})
+    good = json.dumps({"type": "result", "structured_output": {"verdicts": [{"decision": "allow"}]}})
+    script = (f"import sys; sys.stdout.write({bad!r} + chr(10)); "
+              f"sys.stdout.write({good!r} + chr(10)); sys.stdout.flush()")
+    p = ClaudeCliProvider(timeout=10)
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x", _VERDICTS_SCHEMA)
+    assert json.loads(out) == {"verdicts": [{"decision": "allow"}]}
+
+
+def test_no_structured_output_is_transient():
+    # a session that ends without valid output must be retryable, not a permanent failure
+    p = ClaudeCliProvider(timeout=10)
+    with pytest.raises(LLMTransientError):
+        p._complete_schema_streaming([sys.executable, "-c", "pass"], "x", _VERDICTS_SCHEMA)

@@ -11,8 +11,8 @@ def test_defaults_when_no_path():
     assert c.autonomy == "balanced"
     assert c.models.architect == "claude-opus-4-8"
     assert c.llm_retries == 2
-    assert c.memory.spec == 18000
-    assert c.memory.claude == 15000
+    assert c.memory.spec == 30000
+    assert c.memory.claude == 24000
 
 
 def test_missing_file_uses_defaults(tmp_path):

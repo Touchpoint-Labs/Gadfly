@@ -65,6 +65,21 @@ def complete_with_retry(
 _TOOL_CAP = 5  # a review may use at most this many tools before it must produce a verdict
 
 
+def _conforms(obj, schema: dict) -> bool:
+    """Minimal top-level schema check: required keys present, no extras when the
+    schema forbids them. Full validation stays CC-side; this only guards against
+    accepting a payload CC already rejected."""
+    if not isinstance(obj, dict):
+        return False
+    if any(k not in obj for k in schema.get("required", [])):
+        return False
+    if schema.get("additionalProperties") is False:
+        props = schema.get("properties", {})
+        if any(k not in props for k in obj):
+            return False
+    return True
+
+
 class ClaudeCliProvider:
     """Rides the user's Claude Code subscription via `claude -p` — no API key.
 
@@ -90,7 +105,7 @@ class ClaudeCliProvider:
         # verdict channel) survives `--tools ""`.
         return ["--tools", ""]
 
-    def _complete_schema_streaming(self, cmd: list[str], prompt: str) -> str:
+    def _complete_schema_streaming(self, cmd: list[str], prompt: str, schema: dict) -> str:
         # stderr → a temp file, never a PIPE: streaming drains only stdout, so an undrained
         # stderr PIPE would deadlock a chatty child once its 64KB buffer fills.
         stderr_file = tempfile.TemporaryFile()
@@ -141,7 +156,17 @@ class ClaudeCliProvider:
                     if item.get("type") != "tool_use":
                         continue
                     if item.get("name") == "StructuredOutput":
-                        return json.dumps(item.get("input") or {})
+                        payload = item.get("input") or {}
+                        # models sometimes wrap the payload in a single key; unwrap it
+                        if not _conforms(payload, schema) and isinstance(payload, dict) and len(payload) == 1:
+                            inner = next(iter(payload.values()))
+                            if _conforms(inner, schema):
+                                payload = inner
+                        if _conforms(payload, schema):
+                            return json.dumps(payload)
+                        # non-conforming: CC rejects it too — keep streaming so the
+                        # model can retry in-session off CC's schema error
+                        continue
                     tool_calls += 1
                     if tool_calls > _TOOL_CAP:
                         # Runaway backstop (prompt steers tools to be rare). Permanent, not
@@ -165,7 +190,7 @@ class ClaudeCliProvider:
                 except OSError:
                     err = ""
                 raise LLMTransientError(f"claude -p exited {proc.returncode}: {err}")
-            raise LLMError(
+            raise LLMTransientError(
                 "claude -p returned no structured_output for a schema request"
             )
         except subprocess.TimeoutExpired as e:
@@ -211,7 +236,7 @@ class ClaudeCliProvider:
             cmd += ["--json-schema", json.dumps(schema)]
         try:
             if schema is not None:
-                return self._complete_schema_streaming(cmd, prompt)
+                return self._complete_schema_streaming(cmd, prompt, schema)
             proc = subprocess.run(
                 cmd,
                 input=prompt,
@@ -242,7 +267,7 @@ class ClaudeCliProvider:
         if schema is not None:
             out = env.get("structured_output")
             if out is None:
-                raise LLMError(
+                raise LLMTransientError(
                     "claude -p returned no structured_output for a schema request"
                 )
             return json.dumps(out)
