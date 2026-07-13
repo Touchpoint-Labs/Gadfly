@@ -58,6 +58,7 @@ class Config:
     memory: MemoryBudgets = field(default_factory=MemoryBudgets)
     llm_timeout: int = 240  # seconds per LLM call (measured architect reviews reach ~240s on big models)
     llm_retries: int = 2  # attempts on transient errors
+    tool_budget: int = 5  # read/search tools the code reviewer / solo reviewers may use before they must produce a verdict (regular architect always runs tool-less); 0 = none
     poll_timeout: float = 3.0  # seconds to wait for the transcript to flush at the gate
     convo_tail_budget: int = 24000  # chars of recent conversation a supervisor sees
     disable_code_reviewer: bool = False  # architect alone, covering code via architect_solo.md
@@ -117,6 +118,8 @@ def load(path: Optional[Path] = None) -> Config:
         raise ValueError(
             f"unknown test_review {cfg.test_review!r}; expected one of {TEST_REVIEW}"
         )
+    if cfg.tool_budget < 0:
+        raise ValueError(f"tool_budget must be >= 0, got {cfg.tool_budget}")
     if cfg.disable_code_reviewer and cfg.disable_architect:
         raise ValueError(
             "disable_code_reviewer and disable_architect are both set — that turns off "

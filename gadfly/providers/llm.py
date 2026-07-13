@@ -15,6 +15,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from typing import Optional, Protocol
 
 
@@ -63,19 +64,28 @@ def complete_with_retry(
 
 
 _TOOL_CAP = 5  # a review may use at most this many tools before it must produce a verdict
+_FORCE_VERDICT = object()  # sentinel: tool budget spent — resume with tools off to force a verdict
 
 
 def _conforms(obj, schema: dict) -> bool:
     """Minimal top-level schema check: required keys present, no extras when the
-    schema forbids them. Full validation stays CC-side; this only guards against
-    accepting a payload CC already rejected."""
+    schema forbids them, and each present key's value has the schema's declared
+    array/object type. Full validation stays CC-side; this guards against accepting
+    a payload CC already rejected — including the {"verdicts": {"verdicts": [...]}}
+    double-nesting, which passes a keys-only check but has a non-array `verdicts`."""
     if not isinstance(obj, dict):
         return False
     if any(k not in obj for k in schema.get("required", [])):
         return False
+    props = schema.get("properties", {})
     if schema.get("additionalProperties") is False:
-        props = schema.get("properties", {})
         if any(k not in props for k in obj):
+            return False
+    for k, v in obj.items():
+        t = (props.get(k) or {}).get("type")
+        if t == "array" and not isinstance(v, list):
+            return False
+        if t == "object" and not isinstance(v, dict):
             return False
     return True
 
@@ -87,9 +97,12 @@ class ClaudeCliProvider:
     stdin. With a schema, the result is read from the `structured_output` field.
     """
 
-    def __init__(self, binary: str = "claude", timeout: int = 60):
+    def __init__(
+        self, binary: str = "claude", timeout: int = 60, tool_budget: int = _TOOL_CAP
+    ):
         self._binary = binary
         self._timeout = timeout
+        self._tool_cap = tool_budget
 
     def _tool_args(self, tools: bool) -> list[str]:
         if tools:
@@ -105,7 +118,31 @@ class ClaudeCliProvider:
         # verdict channel) survives `--tools ""`.
         return ["--tools", ""]
 
-    def _complete_schema_streaming(self, cmd: list[str], prompt: str, schema: dict) -> str:
+    def _complete_schema_streaming(
+        self, cmd: list[str], prompt: str, schema: dict, force: Optional[tuple] = None
+    ) -> str:
+        """Stream one verdict. If the review spends its tool budget without a verdict
+        and `force` (session_id, model) is given, resume that session with tools off and
+        make the model deliver its verdict from what it already found — a hard cap, not a
+        plea. Without `force`, hitting the cap raises (a tool-less call never can)."""
+        r = self._stream(cmd, prompt, schema, allow_force=force is not None)
+        if r is not _FORCE_VERDICT:
+            return r
+        session_id, model = force  # type: ignore[misc]
+        resume_cmd = [
+            self._binary, "-p", "--resume", session_id, "--model", model,
+            "--output-format", "stream-json", "--verbose", "--tools", "",
+            "--json-schema", json.dumps(schema),
+        ]
+        forcing = (
+            "You have reached your tool budget — do not call any more tools. Deliver your "
+            "verdict now via StructuredOutput, based only on what you have already found."
+        )
+        return self._stream(resume_cmd, forcing, schema, allow_force=False)
+
+    def _stream(
+        self, cmd: list[str], prompt: str, schema: dict, allow_force: bool
+    ) -> str:
         # stderr → a temp file, never a PIPE: streaming drains only stdout, so an undrained
         # stderr PIPE would deadlock a chatty child once its 64KB buffer fills.
         stderr_file = tempfile.TemporaryFile()
@@ -174,12 +211,16 @@ class ClaudeCliProvider:
                         # model can retry in-session off CC's schema error
                         continue
                     tool_calls += 1
-                    if tool_calls > _TOOL_CAP:
-                        # Runaway backstop (prompt steers tools to be rare). Permanent, not
-                        # transient: retrying re-spends the budget on a model already ignoring
-                        # the instruction. Propagates → the review steps aside (D2), never allows.
+                    if tool_calls > self._tool_cap:
+                        if allow_force:
+                            # Budget spent without a verdict: stop here and let the caller
+                            # resume the session with tools off, forcing the verdict from
+                            # what's already been gathered — never a raise, never a defer.
+                            return _FORCE_VERDICT
+                        # No session to resume (a tool-less call can't reach here anyway):
+                        # permanent, so it doesn't re-spend the budget on retry.
                         raise LLMError(
-                            f"review used more than {_TOOL_CAP} tools without a verdict"
+                            f"review used more than {self._tool_cap} tools without a verdict"
                         )
                 if event.get("type") == "result":
                     if event.get("is_error"):
@@ -224,6 +265,9 @@ class ClaudeCliProvider:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write(system)
             system_file = f.name
+        # tool_budget 0 means no exploration at all: run tool-less so the model must
+        # produce its verdict immediately — cheaper (no tool defs) than capping at the 1st call.
+        tooled = tools and self._tool_cap > 0
         output_format = "stream-json" if schema is not None else "json"
         cmd = [
             self._binary,
@@ -237,12 +281,19 @@ class ClaudeCliProvider:
         ]
         if schema is not None:
             cmd += ["--verbose"]
-        cmd += self._tool_args(tools)
+        cmd += self._tool_args(tooled)
+        # A tooled schema call gets a known session id so that, if it spends its tool
+        # budget without a verdict, the review can resume it with tools off and force one.
+        force = None
+        if schema is not None and tooled:
+            session_id = str(uuid.uuid4())
+            cmd += ["--session-id", session_id]
+            force = (session_id, model)
         if schema is not None:
             cmd += ["--json-schema", json.dumps(schema)]
         try:
             if schema is not None:
-                return self._complete_schema_streaming(cmd, prompt, schema)
+                return self._complete_schema_streaming(cmd, prompt, schema, force)
             proc = subprocess.run(
                 cmd,
                 input=prompt,

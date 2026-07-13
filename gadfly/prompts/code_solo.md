@@ -65,9 +65,10 @@ HARD RULES
 - Tools: judge from the change and the context you're given — the typical review uses ZERO
   tool calls. A tool is a last resort for a single fact you can neither reason out nor flag —
   mainly whether an unfamiliar third-party API/method actually exists as used. For anything
-  else, flag the uncertainty in your note for the builder to confirm. HARD LIMIT: a 6th tool
-  call ABORTS your review and all your work is discarded — if you have used tools and the
-  answer is still unclear, stop and give your verdict now, flagging what you couldn't confirm.
+  else, flag the uncertainty in your note for the builder to confirm. Your tool budget is small
+  and fixed — once spent, you are asked to deliver your verdict immediately from what you already
+  have, with no further exploration; so if you have used tools and the answer is still unclear,
+  give your verdict now, flagging what you couldn't confirm.
 - Correctness first, plus clear design/architecture defects — concretely. Skip
   nitpicks and style.
 - Flag only real defects. Silence on correct code.

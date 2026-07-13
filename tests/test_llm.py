@@ -260,6 +260,60 @@ def test_review_exceeds_tool_cap_is_permanent():
     assert not isinstance(ei.value, LLMTransientError)
 
 
+def test_tool_cap_honors_configured_budget():
+    # tool_budget lowers the cap: 2 tool calls trip a budget of 1
+    script = (
+        "import sys, json; "
+        "m = json.dumps({'message': {'content': [{'type': 'tool_use', 'name': 'Read', 'input': {}}]}}); "
+        "[sys.stdout.write(m + chr(10)) or sys.stdout.flush() for _ in range(2)]"
+    )
+    p = ClaudeCliProvider(timeout=10, tool_budget=1)
+    with pytest.raises(LLMError):
+        p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
+
+
+def test_spent_tool_budget_forces_a_verdict_via_resume(monkeypatch):
+    # over budget with a session to resume → no raise: resume with tools off and return
+    # the forced verdict, not a defer.
+    p = ClaudeCliProvider(timeout=10, tool_budget=1)
+    calls = []
+
+    def fake_stream(cmd, prompt, schema, allow_force):
+        calls.append((cmd, allow_force))
+        if len(calls) == 1:
+            return llm._FORCE_VERDICT  # first pass spent its budget
+        return json.dumps({"verdicts": [{"decision": "allow"}]})  # forced resume
+
+    monkeypatch.setattr(p, "_stream", fake_stream)
+    out = p._complete_schema_streaming(
+        ["claude"], "x", _VERDICTS_SCHEMA, force=("sess-1", "m")
+    )
+    assert json.loads(out) == {"verdicts": [{"decision": "allow"}]}
+    resume_cmd, resume_force = calls[1]
+    assert "--resume" in resume_cmd and "sess-1" in resume_cmd
+    assert resume_cmd[resume_cmd.index("--tools") + 1] == ""  # resume explores nothing
+    assert resume_force is False  # the forced turn can't itself force again
+
+
+def test_tool_budget_zero_runs_tool_less(monkeypatch):
+    # tool_budget 0 → no exploration: the tooled reviewer runs with --tools "" and no
+    # resumable session id, so it must produce its verdict immediately.
+    captured = {}
+
+    def fake_streaming(cmd, prompt, schema, force=None):
+        captured["cmd"] = cmd
+        captured["force"] = force
+        return json.dumps({"verdicts": []})
+
+    p = ClaudeCliProvider(tool_budget=0)
+    monkeypatch.setattr(p, "_complete_schema_streaming", fake_streaming)
+    p.complete(system="s", prompt="p", model="m", schema=_VERDICTS_SCHEMA, tools=True)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert "--session-id" not in cmd
+    assert captured["force"] is None
+
+
 # --- schema-fumble resilience: unwrap wrappers, skip garbage, retry on empty ---
 
 _VERDICTS_SCHEMA = {
@@ -305,6 +359,18 @@ def test_string_encoded_wrapper_payload_is_unwrapped():
     inner = json.dumps({"verdicts": [{"decision": "allow"}]})
     line = json.dumps({"message": {"content": [{"type": "tool_use", "name": "StructuredOutput",
                                                 "input": {"$PARAMETER_NAME": inner}}]}})
+    script = f"import sys; sys.stdout.write({line!r} + chr(10)); sys.stdout.flush()"
+    p = ClaudeCliProvider(timeout=10)
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x", _VERDICTS_SCHEMA)
+    assert json.loads(out) == {"verdicts": [{"decision": "allow"}]}
+
+
+def test_double_nested_verdicts_is_unwrapped():
+    # the "verdicts under verdicts" fumble: the RIGHT top-level key, but its value is
+    # another {"verdicts":[...]} object instead of the array. A keys-only check waves it
+    # through as valid (→ downstream parse crash → defer); it must be unwrapped.
+    line = json.dumps({"message": {"content": [{"type": "tool_use", "name": "StructuredOutput",
+                       "input": {"verdicts": {"verdicts": [{"decision": "allow"}]}}}]}})
     script = f"import sys; sys.stdout.write({line!r} + chr(10)); sys.stdout.flush()"
     p = ClaudeCliProvider(timeout=10)
     out = p._complete_schema_streaming([sys.executable, "-c", script], "x", _VERDICTS_SCHEMA)

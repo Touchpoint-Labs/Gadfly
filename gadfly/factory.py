@@ -25,7 +25,9 @@ from .supervisors import (
 
 def _make_provider(name: str, config: Config) -> LLMProvider:
     if name == "claude_cli":
-        return ClaudeCliProvider(timeout=config.llm_timeout)
+        return ClaudeCliProvider(
+            timeout=config.llm_timeout, tool_budget=config.tool_budget
+        )
     if name == "anthropic_api":
         key = os.environ.get(config.anthropic_api.api_key_env, "")
         if not key:
