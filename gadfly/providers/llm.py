@@ -157,9 +157,15 @@ class ClaudeCliProvider:
                         continue
                     if item.get("name") == "StructuredOutput":
                         payload = item.get("input") or {}
-                        # models sometimes wrap the payload in a single key; unwrap it
+                        # models sometimes wrap the payload in a single key — occasionally
+                        # with the payload itself JSON-encoded as a string; unwrap both
                         if not _conforms(payload, schema) and isinstance(payload, dict) and len(payload) == 1:
                             inner = next(iter(payload.values()))
+                            if isinstance(inner, str):
+                                try:
+                                    inner = json.loads(inner)
+                                except json.JSONDecodeError:
+                                    inner = None
                             if _conforms(inner, schema):
                                 payload = inner
                         if _conforms(payload, schema):

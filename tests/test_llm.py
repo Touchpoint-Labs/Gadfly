@@ -297,3 +297,15 @@ def test_no_structured_output_is_transient():
     p = ClaudeCliProvider(timeout=10)
     with pytest.raises(LLMTransientError):
         p._complete_schema_streaming([sys.executable, "-c", "pass"], "x", _VERDICTS_SCHEMA)
+
+
+def test_string_encoded_wrapper_payload_is_unwrapped():
+    # the "$PARAMETER_NAME" fumble: single wrapper key whose value is the payload
+    # JSON-encoded as a string
+    inner = json.dumps({"verdicts": [{"decision": "allow"}]})
+    line = json.dumps({"message": {"content": [{"type": "tool_use", "name": "StructuredOutput",
+                                                "input": {"$PARAMETER_NAME": inner}}]}})
+    script = f"import sys; sys.stdout.write({line!r} + chr(10)); sys.stdout.flush()"
+    p = ClaudeCliProvider(timeout=10)
+    out = p._complete_schema_streaming([sys.executable, "-c", script], "x", _VERDICTS_SCHEMA)
+    assert json.loads(out) == {"verdicts": [{"decision": "allow"}]}
