@@ -40,7 +40,7 @@ def find_workspace(cwd) -> Path:
 # hook's legitimate work: Stop and SessionStart run inline LLM passes (feedback
 # extraction, memory compaction) that can take up to llm_timeout each.
 _HOOKS: dict[str, tuple[str | None, int | None]] = {
-    "UserPromptSubmit": (None, 120),
+    "UserPromptSubmit": (None, 600),  # one-time midwife pass is an inline LLM call
     "PreToolUse": ("Write|Edit|MultiEdit|Bash", PRETOOLUSE_TIMEOUT),
     "PostToolUse": ("Write|Edit|MultiEdit|NotebookEdit", 120),
     "SessionStart": (None, 600),
