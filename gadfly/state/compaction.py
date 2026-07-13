@@ -193,8 +193,12 @@ def check_all(
             continue
         if not path.is_file() or not check(path, budget):
             continue
-        if compact(path, budget, condense, gadfly_dir):
+        if name in HUMAN_OWNED and proposal(gadfly_dir, name) is not None:
+            proposed.append(name)  # pending proposal already covers it; no new LLM call
             continue
-        if name in HUMAN_OWNED:
+        if not compact(path, budget, condense, gadfly_dir) and name in HUMAN_OWNED:
             proposed.append(name)
+        # At most one condense per pass: each is an LLM call, and the calling
+        # hook has a wall-clock ceiling. The next pass takes the next file.
+        break
     return proposed

@@ -21,14 +21,18 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# CC event -> (matcher | None, timeout seconds | None). Mirrors the hand-written
-# settings.json we've been dogfooding; keep in sync with the hook modules.
+# The gate's registered ceiling; the pretooluse clamp keeps retries x timeout under it.
+PRETOOLUSE_TIMEOUT = 600
+
+# CC event -> (matcher | None, timeout seconds | None). Ceilings are sized to each
+# hook's legitimate work: Stop and SessionStart run inline LLM passes (feedback
+# extraction, memory compaction) that can take up to llm_timeout each.
 _HOOKS: dict[str, tuple[str | None, int | None]] = {
     "UserPromptSubmit": (None, 120),
-    "PreToolUse": ("Write|Edit|MultiEdit|Bash", 600),
-    "PostToolUse": ("Write|Edit|MultiEdit|NotebookEdit", None),
-    "SessionStart": (None, None),
-    "Stop": (None, 120),
+    "PreToolUse": ("Write|Edit|MultiEdit|Bash", PRETOOLUSE_TIMEOUT),
+    "PostToolUse": ("Write|Edit|MultiEdit|NotebookEdit", 120),
+    "SessionStart": (None, 600),
+    "Stop": (None, 600),
 }
 # CC event -> the `gadfly hook <name>` subcommand that runs it
 _EVENT_CMD: dict[str, str] = {

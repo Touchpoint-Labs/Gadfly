@@ -101,7 +101,9 @@ def test_accept_and_dismiss_proposal(tmp_path):
     assert compaction.pending_proposals(gadfly) == []
 
 
-def test_check_all_with_mixed_owned(tmp_path, monkeypatch):
+def test_check_all_one_condense_per_pass(tmp_path, monkeypatch):
+    """One LLM condense per pass (hook wall-clock bound); pending proposals are
+    reported without re-condensing; successive passes converge over all files."""
     workspace = tmp_path / "project"
     workspace.mkdir()
     spec = workspace / "spec.md"
@@ -118,20 +120,45 @@ def test_check_all_with_mixed_owned(tmp_path, monkeypatch):
 
     gadfly = workspace / ".gadfly"
 
+    calls = []
+
     def condense(content, budget):
+        calls.append(content[:1])
         return "compact" * max(1, budget // 8)
 
     budgets = {"spec": 50, "claude": 50, "codemap": 50, "memory": 50}
-    proposed = compaction.check_all(workspace, gadfly, budgets, condense)
 
-    assert set(proposed) == {"spec.md", "claude.md"}
+    # pass 1: only the first over-budget file (spec) is condensed
+    assert compaction.check_all(workspace, gadfly, budgets, condense) == ["spec.md"]
+    assert len(calls) == 1
     assert compaction.proposal(gadfly, "spec.md") is not None
+    assert compaction.proposal(gadfly, "claude.md") is None
+    assert spec.read_text() == "x" * 200  # human-owned: untouched
+
+    # pass 2: spec's pending proposal is reported without a new condense; claude's turn
+    assert compaction.check_all(workspace, gadfly, budgets, condense) == [
+        "spec.md",
+        "claude.md",
+    ]
+    assert len(calls) == 2
     assert compaction.proposal(gadfly, "claude.md") is not None
-    assert spec.read_text().startswith("x" * 100)
-    assert claude.read_text().startswith("z" * 100)
+
+    # pass 3: memory.md (AI-owned) is compacted in place
+    assert compaction.check_all(workspace, gadfly, budgets, condense) == [
+        "spec.md",
+        "claude.md",
+    ]
+    assert len(calls) == 3
     global_mem = tmp_path / "global" / ".gadfly" / "memory.md"
     assert "compact" in global_mem.read_text()
-    assert codemap.read_text() == "y" * 50  # under budget, untouched
+
+    # pass 4: everything handled — only pending proposals reported, no LLM work
+    assert compaction.check_all(workspace, gadfly, budgets, condense) == [
+        "spec.md",
+        "claude.md",
+    ]
+    assert len(calls) == 3
+    assert codemap.read_text() == "y" * 50  # under budget, untouched throughout
 
 
 def test_proposal_none_for_missing(tmp_path):
