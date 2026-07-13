@@ -91,25 +91,51 @@ def session_messages(records: list[dict]) -> list[ConvoEntry]:
     them (deduped, so re-handing the session each gate is idempotent) and decides
     what slice a supervisor sees. Whole-session, not current-turn, so a mid-session
     install isn't blind to everything said before the first gate. Harness-injected
-    user records (\"<system-reminder>\"-style) are noise, not conversation — skipped."""
+    user records (\"<system-reminder>\"-style) are noise, not conversation — skipped.
+    An AskUserQuestion answer arrives as a user record whose content is a tool_result,
+    not a string; its summary is the user's decision, so it's captured too — otherwise
+    a supervisor is blind to every choice the builder gathered by asking."""
     out: list[ConvoEntry] = []
+    ask_ids: set[str] = set()  # AskUserQuestion tool_use ids → their results are user answers
     for rec in records:
         msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
         content = msg.get("content")
-        if rec.get("type") == "user" and isinstance(content, str):
-            if content.strip() and not content.lstrip().startswith("<"):
-                out.append(ConvoEntry("user", "text", content))
+        if rec.get("type") == "user":
+            if isinstance(content, str):
+                if content.strip() and not content.lstrip().startswith("<"):
+                    out.append(ConvoEntry("user", "text", content))
+                continue
+            for b in content if isinstance(content, list) else []:
+                if (isinstance(b, dict) and b.get("type") == "tool_result"
+                        and b.get("tool_use_id") in ask_ids):
+                    text = _result_text(b.get("content"))
+                    if text:
+                        out.append(ConvoEntry("user", "text", text))
             continue
         if rec.get("type") != "assistant":
             continue
         for b in content if isinstance(content, list) else []:
             if not isinstance(b, dict):
                 continue
-            if b.get("type") == "text" and b.get("text"):
+            if b.get("type") == "tool_use" and b.get("name") == "AskUserQuestion":
+                if b.get("id"):
+                    ask_ids.add(b["id"])
+            elif b.get("type") == "text" and b.get("text"):
                 out.append(ConvoEntry("assistant", "text", b["text"]))
             elif b.get("type") == "thinking" and b.get("thinking"):
                 out.append(ConvoEntry("assistant", "thinking", b["thinking"]))
     return out
+
+
+def _result_text(content) -> str:
+    """The text of a tool_result whose content is a string or a list of blocks."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = [b.get("text", "") for b in content
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        return "\n".join(p for p in parts if p).strip()
+    return ""
 
 
 _TAIL_BYTES = 256 * 1024  # initial batch-detection tail; doubles if a batch spans more

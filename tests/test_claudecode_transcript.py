@@ -64,6 +64,24 @@ def test_session_messages_skips_harness_injected_user_records():
     assert [m.text for m in msgs] == ["real prompt"]
 
 
+def test_session_messages_captures_askuserquestion_answers():
+    # an AskUserQuestion answer is a user record whose content is a tool_result (not a
+    # string); its summary is the user's decision and must reach supervisors. An ordinary
+    # tool_result (a Read's output) stays excluded — keyed on the question's tool_use_id.
+    answer = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "q1",
+         "content": 'Your questions have been answered: "Rollover?"="2am"'}]}}
+    read_out = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "z9", "content": "file contents"}]}}
+    recs = [_user("build it"),
+            _tool("m1", "q1", "AskUserQuestion", {"questions": []}), answer,
+            _tool("m2", "z9", "Read", {"file_path": "/p"}), read_out]
+    texts = [m.text for m in session_messages(recs) if m.role == "user"]
+    assert "build it" in texts
+    assert any(t.startswith("Your questions have been answered") for t in texts)
+    assert "file contents" not in texts
+
+
 def test_read_tolerates_torn_line(tmp_path):
     # the transcript is written concurrently; a still-flushing final line must lose one
     # record, not crash the whole-file read (which would defer the action unreviewed)
