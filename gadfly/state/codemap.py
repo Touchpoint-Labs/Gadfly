@@ -14,22 +14,30 @@ from .edits import EditLedger
 from .memory import ProjectMemory
 
 THRESHOLD = 8  # code edits behind before the builder is nudged to refresh codemap.md
+MISSING_THRESHOLD = 3  # lower bar when codemap.md doesn't exist — the architect reviews blind
 
 
-def pending(workspace: Path) -> int:
-    """Builder code-edits recorded since codemap.md was last updated (0 when it's fresh)."""
+def pending(workspace: Path) -> tuple[int, bool]:
+    """(builder code-edits since codemap.md was last updated, codemap exists)."""
     workspace = Path(workspace)
     codemap = ProjectMemory(workspace).path_for("codemap.md")
     try:
         since = codemap.stat().st_mtime
+        exists = True
     except OSError:
         since = 0.0  # no codemap yet → every edit counts
-    return EditLedger(workspace / ".gadfly").edits_since(since)
+        exists = False
+    return EditLedger(workspace / ".gadfly").edits_since(since), exists
 
 
 def nudge(workspace: Path) -> str | None:
-    """A one-line reminder when codemap.md is at least THRESHOLD edits stale, else None."""
-    n = pending(workspace)
+    """A one-line reminder when codemap.md is missing or stale enough, else None."""
+    n, exists = pending(workspace)
+    if not exists:
+        if n < MISSING_THRESHOLD:
+            return None
+        return ("codemap.md doesn't exist yet — write one so the architect reviews against "
+                "the real structure (brief, descriptive: modules and their responsibilities).")
     if n < THRESHOLD:
         return None
     return (f"codemap.md is {n} code edits behind — refresh it to reflect the current "

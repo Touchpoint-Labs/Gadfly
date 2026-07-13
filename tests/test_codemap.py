@@ -61,7 +61,7 @@ def test_pending_counts_edits_after_codemap(tmp_path):
     base = datetime.now(timezone.utc)
     _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
     _set_mtime(cm, base - timedelta(minutes=1))               # codemap is older than the edits
-    assert codemap.pending(tmp_path) == 8
+    assert codemap.pending(tmp_path) == (8, True)
     msg = codemap.nudge(tmp_path)
     assert msg and "8 code edits" in msg
 
@@ -73,7 +73,7 @@ def test_below_threshold_no_nudge(tmp_path):
     base = datetime.now(timezone.utc)
     _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(7)])
     _set_mtime(cm, base - timedelta(minutes=1))
-    assert codemap.pending(tmp_path) == 7
+    assert codemap.pending(tmp_path) == (7, True)
     assert codemap.nudge(tmp_path) is None                    # 7 < THRESHOLD (8)
 
 
@@ -84,7 +84,7 @@ def test_updating_codemap_resets_the_count(tmp_path):
     base = datetime.now(timezone.utc)
     _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
     _set_mtime(cm, base + timedelta(minutes=1))               # codemap written AFTER the edits
-    assert codemap.pending(tmp_path) == 0                     # self-reset via mtime
+    assert codemap.pending(tmp_path) == (0, True)             # self-reset via mtime
     assert codemap.nudge(tmp_path) is None
 
 
@@ -92,8 +92,26 @@ def test_no_codemap_counts_everything(tmp_path):
     g = tmp_path / ".gadfly"
     base = datetime.now(timezone.utc)
     _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(8)])
-    assert codemap.pending(tmp_path) == 8                     # no codemap.md → since=0
-    assert codemap.nudge(tmp_path) is not None
+    assert codemap.pending(tmp_path) == (8, False)            # no codemap.md → since=0
+    msg = codemap.nudge(tmp_path)
+    assert msg and "doesn't exist yet" in msg
+
+
+def test_missing_codemap_uses_lower_threshold(tmp_path):
+    # a project with no codemap at all gets nudged after MISSING_THRESHOLD edits, not 8 —
+    # the architect reviews blind until one exists
+    g = tmp_path / ".gadfly"
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(3)])
+    msg = codemap.nudge(tmp_path)
+    assert msg and "doesn't exist yet" in msg
+
+
+def test_missing_codemap_below_lower_threshold_stays_quiet(tmp_path):
+    g = tmp_path / ".gadfly"
+    base = datetime.now(timezone.utc)
+    _ledger(g, *[_entry(f"/p/f{i}.py", base + timedelta(seconds=i)) for i in range(2)])
+    assert codemap.nudge(tmp_path) is None
 
 
 # --- the gate rides the nudge on an allow, never on a deny -------------------
