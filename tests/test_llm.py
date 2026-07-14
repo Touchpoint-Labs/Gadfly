@@ -165,7 +165,9 @@ def test_schema_cli_uses_streaming_output(monkeypatch):
     assert "--verbose" in _last_popen().cmd
 
 
-def test_cli_disallows_delegation_tools_by_default(monkeypatch):
+def test_cli_runs_tool_less(monkeypatch):
+    # Reviewers are tool-less: `--tools ""` genuinely disables all tools (NOT a
+    # --disallowedTools denylist, which models route around via MCP; NOT --allowedTools "").
     commands = []
 
     def run(cmd, **kw):
@@ -176,9 +178,10 @@ def test_cli_disallows_delegation_tools_by_default(monkeypatch):
 
     monkeypatch.setattr(llm.subprocess, "run", run)
     ClaudeCliProvider().complete(system="s", prompt="p", model="m")
-    disallowed = commands[0][commands[0].index("--disallowedTools") + 1]
-    assert "Agent" in disallowed
-    assert "TaskCreate" in disallowed
+    cmd = commands[0]
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert "--disallowedTools" not in cmd
+    assert "--allowedTools" not in cmd
 
 
 def test_cli_nonzero_exit_is_transient(monkeypatch):
@@ -226,92 +229,6 @@ def test_streaming_survives_large_stderr_without_deadlock():
     p = ClaudeCliProvider(timeout=10)
     out = p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
     assert json.loads(out) == {"ok": True}
-
-
-def test_cli_tools_off_uses_tools_empty(monkeypatch):
-    # tools=False must genuinely disable tools via `--tools ""` — NOT `--allowedTools ""`
-    # (which claude -p treats as no filter, verified in-session).
-    commands = []
-
-    def run(cmd, **kw):
-        commands.append(cmd)
-        return subprocess.CompletedProcess(
-            cmd, 0, stdout=json.dumps({"is_error": False, "result": "ok"}), stderr=""
-        )
-
-    monkeypatch.setattr(llm.subprocess, "run", run)
-    ClaudeCliProvider().complete(system="s", prompt="p", model="m", tools=False)
-    cmd = commands[0]
-    assert cmd[cmd.index("--tools") + 1] == ""
-    assert "--allowedTools" not in cmd
-
-
-def test_review_exceeds_tool_cap_is_permanent():
-    # a reviewer that keeps calling tools past the 5-cap → permanent LLMError (→ step-aside),
-    # never retried and never a silent allow.
-    script = (
-        "import sys, json; "
-        "m = json.dumps({'message': {'content': [{'type': 'tool_use', 'name': 'Read', 'input': {}}]}}); "
-        "[sys.stdout.write(m + chr(10)) or sys.stdout.flush() for _ in range(6)]"
-    )
-    p = ClaudeCliProvider(timeout=10)
-    with pytest.raises(LLMError) as ei:
-        p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
-    assert not isinstance(ei.value, LLMTransientError)
-
-
-def test_tool_cap_honors_configured_budget():
-    # tool_budget lowers the cap: 2 tool calls trip a budget of 1
-    script = (
-        "import sys, json; "
-        "m = json.dumps({'message': {'content': [{'type': 'tool_use', 'name': 'Read', 'input': {}}]}}); "
-        "[sys.stdout.write(m + chr(10)) or sys.stdout.flush() for _ in range(2)]"
-    )
-    p = ClaudeCliProvider(timeout=10, tool_budget=1)
-    with pytest.raises(LLMError):
-        p._complete_schema_streaming([sys.executable, "-c", script], "x", {"type": "object"})
-
-
-def test_spent_tool_budget_forces_a_verdict_via_resume(monkeypatch):
-    # over budget with a session to resume → no raise: resume with tools off and return
-    # the forced verdict, not a defer.
-    p = ClaudeCliProvider(timeout=10, tool_budget=1)
-    calls = []
-
-    def fake_stream(cmd, prompt, schema, allow_force):
-        calls.append((cmd, allow_force))
-        if len(calls) == 1:
-            return llm._FORCE_VERDICT  # first pass spent its budget
-        return json.dumps({"verdicts": [{"decision": "allow"}]})  # forced resume
-
-    monkeypatch.setattr(p, "_stream", fake_stream)
-    out = p._complete_schema_streaming(
-        ["claude"], "x", _VERDICTS_SCHEMA, force=("sess-1", "m")
-    )
-    assert json.loads(out) == {"verdicts": [{"decision": "allow"}]}
-    resume_cmd, resume_force = calls[1]
-    assert "--resume" in resume_cmd and "sess-1" in resume_cmd
-    assert resume_cmd[resume_cmd.index("--tools") + 1] == ""  # resume explores nothing
-    assert resume_force is False  # the forced turn can't itself force again
-
-
-def test_tool_budget_zero_runs_tool_less(monkeypatch):
-    # tool_budget 0 → no exploration: the tooled reviewer runs with --tools "" and no
-    # resumable session id, so it must produce its verdict immediately.
-    captured = {}
-
-    def fake_streaming(cmd, prompt, schema, force=None):
-        captured["cmd"] = cmd
-        captured["force"] = force
-        return json.dumps({"verdicts": []})
-
-    p = ClaudeCliProvider(tool_budget=0)
-    monkeypatch.setattr(p, "_complete_schema_streaming", fake_streaming)
-    p.complete(system="s", prompt="p", model="m", schema=_VERDICTS_SCHEMA, tools=True)
-    cmd = captured["cmd"]
-    assert cmd[cmd.index("--tools") + 1] == ""
-    assert "--session-id" not in cmd
-    assert captured["force"] is None
 
 
 # --- schema-fumble resilience: unwrap wrappers, skip garbage, retry on empty ---

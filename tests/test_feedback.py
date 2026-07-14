@@ -18,7 +18,7 @@ class _Mock:
         self.result = result
         self.calls = []
 
-    def complete(self, *, system, prompt, model, schema=None, tools=True):
+    def complete(self, *, system, prompt, model, schema=None):
         self.calls.append(prompt)
         return self.result
 

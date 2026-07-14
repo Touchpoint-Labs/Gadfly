@@ -44,10 +44,8 @@ class AnthropicAPIProvider:
         prompt: str,
         model: str,
         schema: Optional[dict] = None,
-        tools: bool = True,
     ) -> str:
-        # `tools` (the CLI's read/search toggle) has no analog here: this backend grants no
-        # filesystem access, so reviewers are read-only by construction.
+        # This backend grants no filesystem access — reviewers are read-only by construction.
         # The system block is the stable prefix (role + spec + claude + cross-project),
         # identical across a session's gates — cache it (1h TTL, the max, so it survives the
         # think-time gaps between gates) so repeat gates bill it at ~0.1x. Volatile context

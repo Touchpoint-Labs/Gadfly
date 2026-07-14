@@ -11,9 +11,10 @@ call (each inherently aligned), and a lone action it still can't parse ABSTAINS 
 the adapter steps aside to the host's own permission flow rather than vouch with a
 silent allow. It never zips a mismatched count onto actions.
 
-Reviewers are read-only (mutating tools disallowed at the CLI). Logging a decision
-to the ledger is the harness's job from the verdict. The safety triage is the
-exception — a cheap yes/no command filter returning a bool (needs architect review?).
+Reviewers are read-only and tool-less: they reason from the injected context and
+delegate any fact they can't confirm to the builder (flag it to check + narrate).
+Logging a decision to the ledger is the harness's job from the verdict. The safety
+triage is the exception — a cheap yes/no command filter returning a bool.
 """
 from __future__ import annotations
 
@@ -169,13 +170,12 @@ def _aligned_review(actions: list[NormalizedAction],
 
 
 def make_code_reviewer(provider: LLMProvider, model: str, workspace, store: SessionStore,
-                       attempts: int = 3, solo: bool = False,
-                       convo_tail_budget: int = _CONVO_TAIL_BUDGET):
+                       attempts: int = 3, convo_tail_budget: int = _CONVO_TAIL_BUDGET):
     mem = ProjectMemory(workspace)
 
     def review(event: InterventionEvent, actions: list[NormalizedAction]) -> list[Verdict]:
         def call_once(subset):
-            system, user = code_context(mem, store, event, subset, solo, convo_tail_budget)
+            system, user = code_context(mem, store, event, subset, convo_tail_budget)
             raw = complete_with_retry(provider, system=system, prompt=user, model=model,
                                       schema=CODE_VERDICT_SCHEMA, attempts=attempts)
             return parse_verdicts(raw)
@@ -196,12 +196,11 @@ def make_architect(provider: LLMProvider, model: str, workspace, store: SessionS
             cross = learned.read_cross_project(cross_path)
             system, user = architect_context(mem, ledger, store, event, subset, mode, cross,
                                              solo=solo, convo_tail_budget=convo_tail_budget)
-            # Normal architect gets no tools — it reasons at altitude from the spec/codemap/
-            # decisions/change it's given (verified: it never reaches for them). The solo
-            # architect covers the code lane, so it keeps reads for the rare verification.
+            # Reviewers are tool-less — the architect reasons at altitude from the spec/codemap/
+            # decisions/change it's given. Any fact it can't confirm it flags for the builder to
+            # check and narrate, rather than looking it up (solo covers the code lane the same way).
             raw = complete_with_retry(provider, system=system, prompt=user, model=model,
-                                      schema=ARCHITECT_VERDICT_SCHEMA, attempts=attempts,
-                                      tools=solo)
+                                      schema=ARCHITECT_VERDICT_SCHEMA, attempts=attempts)
             return parse_verdicts(raw)
         return _aligned_review(actions, call_once)
 
@@ -221,7 +220,7 @@ def make_safety_triage(provider: LLMProvider, model: str, store: SessionStore, a
         prompt += "\n\nREVIEW or ALLOW?"
         # Cheap REVIEW/ALLOW classifier — no tools (it decides from the command + convo).
         raw = complete_with_retry(provider, system=system, prompt=prompt, model=model,
-                                  attempts=attempts, tools=False)
+                                  attempts=attempts)
         u = raw.upper()
         return ("REVIEW" in u) or ("ALLOW" not in u)
 
@@ -236,7 +235,7 @@ def make_summarizer(provider: LLMProvider, model: str, attempts: int = 2):
         current = prev_digest.strip() or "(none yet)"
         prompt = f"# CURRENT DIGEST\n{current}\n\n# NEW TRANSCRIPT\n{overflow}"
         return complete_with_retry(provider, system=system, prompt=prompt, model=model,
-                                   attempts=attempts, tools=False)
+                                   attempts=attempts)
 
     return summarize
 
@@ -251,7 +250,7 @@ def make_memory_compactor(provider: LLMProvider, model: str, attempts: int = 2):
             f"# FILE\n{content}"
         )
         return complete_with_retry(provider, system=system, prompt=prompt, model=model,
-                                   attempts=attempts, tools=False)
+                                   attempts=attempts)
 
     return condense
 
@@ -284,8 +283,7 @@ def make_midwife(provider: LLMProvider, model: str, attempts: int = 2):
 
     def analyze(spec: str) -> str:
         return complete_with_retry(provider, system=system,
-                                   prompt=f"# SPEC\n{spec}", model=model, attempts=attempts,
-                                   tools=False)
+                                   prompt=f"# SPEC\n{spec}", model=model, attempts=attempts)
 
     return analyze
 
@@ -302,7 +300,7 @@ def make_extractor(provider: LLMProvider, model: str, attempts: int = 2):
                             for c in corrections)
         prompt = f"# EXISTING RULES\n{project_rules.strip() or '(none)'}\n\n# DIFFS\n{diffs}"
         raw = complete_with_retry(provider, system=system, prompt=prompt, model=model,
-                                  schema=_MEMORY_SCHEMA, attempts=attempts, tools=False)
+                                  schema=_MEMORY_SCHEMA, attempts=attempts)
         try:
             items = (json.loads(raw) or {}).get("memories", [])
         except (json.JSONDecodeError, TypeError, AttributeError):

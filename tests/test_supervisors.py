@@ -42,7 +42,7 @@ class _Mock:
         self.results = list(results)
         self.calls = []
 
-    def complete(self, *, system, prompt, model, schema=None, tools=True):
+    def complete(self, *, system, prompt, model, schema=None):
         self.calls.append(
             dict(system=system, prompt=prompt, model=model, schema=schema)
         )
@@ -339,7 +339,6 @@ def test_convo_tail_budget_param_bounds_tail(tmp_path):
 
 def test_solo_prompts_load():
     assert "ARCHITECT" in load_prompt("architect_solo.md")
-    assert "CODE REVIEWER" in load_prompt("code_solo.md")
 
 
 def test_architect_system_solo_uses_variant():
@@ -347,14 +346,13 @@ def test_architect_system_solo_uses_variant():
     assert "catch critical code defects" in s and "{{MODE}}" not in s
 
 
-def test_code_context_solo_uses_variant(tmp_path):
+def test_code_context_includes_codemap(tmp_path):
     mem = ProjectMemory(tmp_path)
+    mem.path_for("codemap.md").write_text("auth.py: login + token refresh")
     store = SessionStore(tmp_path / ".gadfly")
     action = _edit(str(tmp_path / "x.py"))
-    system, _ = code_context(
-        mem, store, _event([action], str(tmp_path)), [action], solo=True
-    )
-    assert "flag clear architectural and design problems" in system
+    _, user = code_context(mem, store, _event([action], str(tmp_path)), [action])
+    assert "STRUCTURE INDEX" in user and "auth.py: login + token refresh" in user
 
 
 def test_make_architect_parses_ask_with_undiscussed(tmp_path):

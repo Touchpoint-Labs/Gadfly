@@ -15,7 +15,6 @@ import subprocess
 import tempfile
 import threading
 import time
-import uuid
 from typing import Optional, Protocol
 
 
@@ -35,7 +34,6 @@ class LLMProvider(Protocol):
         prompt: str,
         model: str,
         schema: Optional[dict] = None,
-        tools: bool = True,
     ) -> str:
         """Return the model's text, or a JSON string conforming to `schema`."""
         ...
@@ -49,22 +47,17 @@ def complete_with_retry(
     model: str,
     schema: Optional[dict] = None,
     attempts: int = 3,
-    tools: bool = True,
 ) -> str:
     last: Optional[LLMTransientError] = None
     for _ in range(attempts):
         try:
             return provider.complete(
-                system=system, prompt=prompt, model=model, schema=schema, tools=tools
+                system=system, prompt=prompt, model=model, schema=schema
             )
         except LLMTransientError as e:  # permanent LLMError propagates immediately
             last = e
     assert last is not None
     raise last
-
-
-_TOOL_CAP = 5  # a review may use at most this many tools before it must produce a verdict
-_FORCE_VERDICT = object()  # sentinel: tool budget spent — resume with tools off to force a verdict
 
 
 def _conforms(obj, schema: dict) -> bool:
@@ -97,52 +90,11 @@ class ClaudeCliProvider:
     stdin. With a schema, the result is read from the `structured_output` field.
     """
 
-    def __init__(
-        self, binary: str = "claude", timeout: int = 60, tool_budget: int = _TOOL_CAP
-    ):
+    def __init__(self, binary: str = "claude", timeout: int = 60):
         self._binary = binary
         self._timeout = timeout
-        self._tool_cap = tool_budget
 
-    def _tool_args(self, tools: bool) -> list[str]:
-        if tools:
-            # Code reviewer / solo reviewers: mutating & delegation tools disallowed; Read/search
-            # stay for the rare "must verify a fact" review (prompt-steered to be rare, capped at 5).
-            return [
-                "--disallowedTools",
-                "Write,Edit,MultiEdit,NotebookEdit,Bash,Agent,TaskCreate",
-            ]
-        # No-tool calls (normal architect + text helpers): `--tools ""` disables ALL tools
-        # (verified). A --disallowedTools denylist is NOT enough — models route around it via MCP
-        # tools; and `--allowedTools ""` doesn't restrict at all. StructuredOutput (the --json-schema
-        # verdict channel) survives `--tools ""`.
-        return ["--tools", ""]
-
-    def _complete_schema_streaming(
-        self, cmd: list[str], prompt: str, schema: dict, force: Optional[tuple] = None
-    ) -> str:
-        """Stream one verdict. If the review spends its tool budget without a verdict
-        and `force` (session_id, model) is given, resume that session with tools off and
-        make the model deliver its verdict from what it already found — a hard cap, not a
-        plea. Without `force`, hitting the cap raises (a tool-less call never can)."""
-        r = self._stream(cmd, prompt, schema, allow_force=force is not None)
-        if r is not _FORCE_VERDICT:
-            return r
-        session_id, model = force  # type: ignore[misc]
-        resume_cmd = [
-            self._binary, "-p", "--resume", session_id, "--model", model,
-            "--output-format", "stream-json", "--verbose", "--tools", "",
-            "--json-schema", json.dumps(schema),
-        ]
-        forcing = (
-            "You have reached your tool budget — do not call any more tools. Deliver your "
-            "verdict now via StructuredOutput, based only on what you have already found."
-        )
-        return self._stream(resume_cmd, forcing, schema, allow_force=False)
-
-    def _stream(
-        self, cmd: list[str], prompt: str, schema: dict, allow_force: bool
-    ) -> str:
+    def _complete_schema_streaming(self, cmd: list[str], prompt: str, schema: dict) -> str:
         # stderr → a temp file, never a PIPE: streaming drains only stdout, so an undrained
         # stderr PIPE would deadlock a chatty child once its 64KB buffer fills.
         stderr_file = tempfile.TemporaryFile()
@@ -173,7 +125,6 @@ class ClaudeCliProvider:
             proc.stdin.write(prompt)
             proc.stdin.close()
             deadline = time.monotonic() + self._timeout
-            tool_calls = 0
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -190,38 +141,24 @@ class ClaudeCliProvider:
                     continue
                 msg = event.get("message") or {}
                 for item in msg.get("content") or []:
-                    if item.get("type") != "tool_use":
+                    if item.get("type") != "tool_use" or item.get("name") != "StructuredOutput":
                         continue
-                    if item.get("name") == "StructuredOutput":
-                        payload = item.get("input") or {}
-                        # models sometimes wrap the payload in a single key — occasionally
-                        # with the payload itself JSON-encoded as a string; unwrap both
-                        if not _conforms(payload, schema) and isinstance(payload, dict) and len(payload) == 1:
-                            inner = next(iter(payload.values()))
-                            if isinstance(inner, str):
-                                try:
-                                    inner = json.loads(inner)
-                                except json.JSONDecodeError:
-                                    inner = None
-                            if _conforms(inner, schema):
-                                payload = inner
-                        if _conforms(payload, schema):
-                            return json.dumps(payload)
-                        # non-conforming: CC rejects it too — keep streaming so the
-                        # model can retry in-session off CC's schema error
-                        continue
-                    tool_calls += 1
-                    if tool_calls > self._tool_cap:
-                        if allow_force:
-                            # Budget spent without a verdict: stop here and let the caller
-                            # resume the session with tools off, forcing the verdict from
-                            # what's already been gathered — never a raise, never a defer.
-                            return _FORCE_VERDICT
-                        # No session to resume (a tool-less call can't reach here anyway):
-                        # permanent, so it doesn't re-spend the budget on retry.
-                        raise LLMError(
-                            f"review used more than {self._tool_cap} tools without a verdict"
-                        )
+                    payload = item.get("input") or {}
+                    # models sometimes wrap the payload in a single key — occasionally
+                    # with the payload itself JSON-encoded as a string; unwrap both
+                    if not _conforms(payload, schema) and isinstance(payload, dict) and len(payload) == 1:
+                        inner = next(iter(payload.values()))
+                        if isinstance(inner, str):
+                            try:
+                                inner = json.loads(inner)
+                            except json.JSONDecodeError:
+                                inner = None
+                        if _conforms(inner, schema):
+                            payload = inner
+                    if _conforms(payload, schema):
+                        return json.dumps(payload)
+                    # non-conforming: CC rejects it too — keep streaming so the
+                    # model can retry in-session off CC's schema error
                 if event.get("type") == "result":
                     if event.get("is_error"):
                         raise LLMTransientError(
@@ -260,14 +197,10 @@ class ClaudeCliProvider:
         prompt: str,
         model: str,
         schema: Optional[dict] = None,
-        tools: bool = True,
     ) -> str:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
             f.write(system)
             system_file = f.name
-        # tool_budget 0 means no exploration at all: run tool-less so the model must
-        # produce its verdict immediately — cheaper (no tool defs) than capping at the 1st call.
-        tooled = tools and self._tool_cap > 0
         output_format = "stream-json" if schema is not None else "json"
         cmd = [
             self._binary,
@@ -281,19 +214,15 @@ class ClaudeCliProvider:
         ]
         if schema is not None:
             cmd += ["--verbose"]
-        cmd += self._tool_args(tooled)
-        # A tooled schema call gets a known session id so that, if it spends its tool
-        # budget without a verdict, the review can resume it with tools off and force one.
-        force = None
-        if schema is not None and tooled:
-            session_id = str(uuid.uuid4())
-            cmd += ["--session-id", session_id]
-            force = (session_id, model)
+        # Reviewers are read-only and tool-less: `--tools ""` disables ALL tools (verified —
+        # a --disallowedTools denylist is bypassable via MCP). StructuredOutput (the
+        # --json-schema verdict channel) survives it. Uncertainty is delegated to the builder.
+        cmd += ["--tools", ""]
         if schema is not None:
             cmd += ["--json-schema", json.dumps(schema)]
         try:
             if schema is not None:
-                return self._complete_schema_streaming(cmd, prompt, schema, force)
+                return self._complete_schema_streaming(cmd, prompt, schema)
             proc = subprocess.run(
                 cmd,
                 input=prompt,

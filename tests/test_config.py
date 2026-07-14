@@ -81,20 +81,6 @@ def test_new_knob_defaults():
     assert c.convo_tail_budget == 24000
     assert c.disable_code_reviewer is False and c.disable_architect is False
     assert c.auto_allow_docs is True and c.test_review == "code"
-    assert c.tool_budget == 5
-
-
-def test_tool_budget_override(tmp_path):
-    p = tmp_path / "gadfly.toml"
-    p.write_text("tool_budget = 0\n")
-    assert load(p).tool_budget == 0
-
-
-def test_negative_tool_budget_raises(tmp_path):
-    p = tmp_path / "gadfly.toml"
-    p.write_text("tool_budget = -1\n")
-    with pytest.raises(ValueError):
-        load(p)
 
 
 def test_unknown_test_review_raises(tmp_path):

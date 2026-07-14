@@ -25,9 +25,7 @@ from .supervisors import (
 
 def _make_provider(name: str, config: Config) -> LLMProvider:
     if name == "claude_cli":
-        return ClaudeCliProvider(
-            timeout=config.llm_timeout, tool_budget=config.tool_budget
-        )
+        return ClaudeCliProvider(timeout=config.llm_timeout)
     if name == "anthropic_api":
         key = os.environ.get(config.anthropic_api.api_key_env, "")
         if not key:
@@ -59,8 +57,7 @@ def build_reviewers(config: Config, workspace: Path, store: SessionStore) -> Rev
     # A disabled reviewer is None; the survivor runs its solo prompt to cover the gap.
     code = None if config.disable_code_reviewer else make_code_reviewer(
         provider_for(config, "code"), config.models.code, workspace, store,
-        attempts=config.llm_retries, solo=config.disable_architect,
-        convo_tail_budget=config.convo_tail_budget,
+        attempts=config.llm_retries, convo_tail_budget=config.convo_tail_budget,
     )
     architect = None if config.disable_architect else make_architect(
         provider_for(config, "architect"), config.models.architect, workspace, store,

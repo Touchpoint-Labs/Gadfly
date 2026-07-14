@@ -151,16 +151,21 @@ def code_context(
     store: SessionStore,
     event: InterventionEvent,
     actions: list[NormalizedAction],
-    solo: bool = False,
     convo_tail_budget: int = _CONVO_TAIL_BUDGET,
 ) -> tuple[str, str]:
-    """Code reviewer: cached[role + claude] + dynamic[convo + change(s) + file(s)].
-    solo loads code_solo.md — design also in scope when no architect runs."""
-    system = load_prompt("code_solo.md" if solo else "code.md")
+    """Code reviewer: cached[role + claude] + dynamic[codemap + convo + change(s) + file(s)].
+    codemap is a structural index — it lets the reviewer check whether a called
+    module/symbol exists (a correctness concern) without a tool, not to judge architecture."""
+    system = load_prompt("code.md")
     if mem.claude.strip():
         system += "\n\n# PROJECT RULES (claude.md)\n" + mem.claude
 
     parts = []
+    if mem.codemap.strip():
+        parts.append(
+            "# STRUCTURE INDEX (codemap.md — what exists where; may reflect drift)\n"
+            + mem.codemap
+        )
     parts.extend(_convo_parts(store, event.session, convo_tail_budget))
     parts.append(_changes_section(actions))
     parts.extend(_files_section(mem, actions))
