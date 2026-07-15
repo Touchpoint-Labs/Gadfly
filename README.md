@@ -96,7 +96,7 @@ Two separate, isolated reviews, never merged, so one can't bias the other. Both 
   conditions, unhandled edges, races, leaks, broken invariants, misused or invented APIs.
   It stays silent on correct code.
 
-Prefer to run lean? A **cover-for-other** mode lets a single model act as sole supervisor,
+Prefer to run lean? A **cover-for-other** mode lets the architect act as sole supervisor,
 covering both lanes through a purpose-written prompt variant.
 
 ## It improves itself
@@ -207,10 +207,10 @@ triage = "claude-haiku-4-5"    # fast command-safety triage
 
 A few more knobs, all optional:
 
-- `disable_code_reviewer` runs the architect alone, and `disable_architect` runs the code reviewer
-  alone. Either one covers both lanes (the cover-for-other mode). For a single supervisor we'd keep
-  the architect: it holds on to Gadfly's Socratic voice and still catches real code bugs in solo
-  mode. You can't disable both.
+- `disable_code_reviewer` runs the architect alone, covering both lanes (the cover-for-other mode):
+  it holds on to Gadfly's Socratic voice and still catches real code bugs in solo mode.
+  `disable_architect` runs the code reviewer alone, but it reviews code correctness only — design
+  and drift go unwatched. For a single supervisor, keep the architect. You can't disable both.
 - `test_review` sets how edits to test files are reviewed: `both` supervisors, `code` only (the
   default), or `off`.
 - `auto_allow_docs` is `true` by default, which skips review of prose docs (`.md`, `.rst`, `.txt`).
