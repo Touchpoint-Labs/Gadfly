@@ -66,17 +66,19 @@ def _gated_calls(view: TurnView, route_fn):
 
 def _clamp_retries(config: Config) -> Config:
     """Retries x timeout must fit the registered hook ceiling: an overrun is killed by CC
-    and fails OPEN. Clamp attempts to keep the gate in charge. int() so a float llm_timeout
-    can't make llm_retries a float, which range() then rejects — crashing every gate."""
+    and fails OPEN. Clamp attempts to keep the gate in charge, and normalize them to a
+    positive int — gadfly.toml can hold a float/0/negative, and complete_with_retry's
+    range(attempts) rejects those, which would defer every gated action instead."""
     cap = max(1, int((PRETOOLUSE_TIMEOUT - 40) // max(1, config.llm_timeout)))
-    if config.llm_retries <= cap:
-        return config
-    print(
-        f"gadfly: llm_retries x llm_timeout exceeds the "
-        f"{PRETOOLUSE_TIMEOUT}s hook ceiling; using {cap} attempt(s)",
-        file=sys.stderr,
-    )
-    return replace(config, llm_retries=cap)
+    attempts = max(1, int(config.llm_retries))
+    if attempts > cap:
+        print(
+            f"gadfly: llm_retries x llm_timeout exceeds the "
+            f"{PRETOOLUSE_TIMEOUT}s hook ceiling; using {cap} attempt(s)",
+            file=sys.stderr,
+        )
+        attempts = cap
+    return replace(config, llm_retries=attempts)
 
 
 def _review_one(action, session: str, cwd: str, config: Config, messages) -> Verdict:
