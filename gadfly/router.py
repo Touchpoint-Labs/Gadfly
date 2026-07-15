@@ -141,8 +141,9 @@ def route(action: NormalizedAction, *, auto_allow_docs: bool = True,
     enabled = {s for s, on in ((CODE, code_enabled), (ARCHITECT, architect_enabled)) if on}
 
     def _to(desired: set[str], reason: str) -> Route:
-        # cover-for-other: when every desired reviewer is disabled, the lone survivor
-        # (running its solo prompt) covers the gap; with neither, nothing reviews.
+        # cover-for-other: when every desired reviewer is disabled, the lone survivor still
+        # reviews — the architect covers code via its solo prompt, but a lone code reviewer
+        # covers only correctness (no design); with neither, nothing reviews.
         actual = desired & enabled
         if actual:
             return _route_to(actual, reason)

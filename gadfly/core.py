@@ -47,8 +47,8 @@ TriageFn = Callable[
 
 @dataclass
 class Reviewers:
-    code: Optional[ReviewFn]  # None when disabled — the architect covers, running solo
-    architect: Optional[ReviewFn]  # None when disabled — the code reviewer covers, running solo
+    code: Optional[ReviewFn]  # None when disabled — the architect covers code, running solo
+    architect: Optional[ReviewFn]  # None when disabled — the code reviewer reviews correctness only
     safety_triage: TriageFn
 
 

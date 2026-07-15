@@ -64,6 +64,21 @@ def _gated_calls(view: TurnView, route_fn):
     return out
 
 
+def _clamp_retries(config: Config) -> Config:
+    """Retries x timeout must fit the registered hook ceiling: an overrun is killed by CC
+    and fails OPEN. Clamp attempts to keep the gate in charge. int() so a float llm_timeout
+    can't make llm_retries a float, which range() then rejects — crashing every gate."""
+    cap = max(1, int((PRETOOLUSE_TIMEOUT - 40) // max(1, config.llm_timeout)))
+    if config.llm_retries <= cap:
+        return config
+    print(
+        f"gadfly: llm_retries x llm_timeout exceeds the "
+        f"{PRETOOLUSE_TIMEOUT}s hook ceiling; using {cap} attempt(s)",
+        file=sys.stderr,
+    )
+    return replace(config, llm_retries=cap)
+
+
 def _review_one(action, session: str, cwd: str, config: Config, messages) -> Verdict:
     store = build_store(cwd)
     store.append_convo(session, messages)
@@ -150,17 +165,7 @@ def main() -> None:
     try:
         # Config load is inside the guard: a malformed/invalid gadfly.toml defers (D2)
         # rather than crashing the gate with an unhandled traceback.
-        config = load(Path(cwd) / "gadfly.toml")
-        # Retries x timeout must fit the registered hook ceiling: an overrun is
-        # killed by CC and fails OPEN. Clamp attempts to keep the gate in charge.
-        cap = max(1, (PRETOOLUSE_TIMEOUT - 40) // max(1, config.llm_timeout))
-        if config.llm_retries > cap:
-            print(
-                f"gadfly: llm_retries x llm_timeout exceeds the "
-                f"{PRETOOLUSE_TIMEOUT}s hook ceiling; using {cap} attempt(s)",
-                file=sys.stderr,
-            )
-            config = replace(config, llm_retries=cap)
+        config = _clamp_retries(load(Path(cwd) / "gadfly.toml"))
         route_fn = build_route_fn(config)
 
         # Deterministic, free: reads / routine commands terminal-allow — no poll, no LLM.

@@ -54,7 +54,8 @@ def build_store(workspace: Path) -> SessionStore:
 def build_reviewers(config: Config, workspace: Path, store: SessionStore) -> Reviewers:
     # Each supervisor gets the provider its [providers] override picks (else the default),
     # so architect / code / triage can run on different backends.
-    # A disabled reviewer is None; the survivor runs its solo prompt to cover the gap.
+    # A disabled reviewer is None. A disabled code reviewer is covered by the architect's
+    # solo prompt; a disabled architect is not covered — the code reviewer stays code-only.
     code = None if config.disable_code_reviewer else make_code_reviewer(
         provider_for(config, "code"), config.models.code, workspace, store,
         attempts=config.llm_retries, convo_tail_budget=config.convo_tail_budget,
