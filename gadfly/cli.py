@@ -25,8 +25,10 @@ from pathlib import Path
 from .adapters.claudecode import install as cc
 
 try:
-    _VERSION = version("gadfly")
-except PackageNotFoundError:
+    # the DISTRIBUTION name — "gadfly" is only the console script, and asking for it
+    # always misses, pinning every install to the source-tree fallback below.
+    _VERSION = version("gadfly-ai")
+except PackageNotFoundError:  # running from a source tree, not installed
     _VERSION = "0.1.0+dev"
 
 _HOOK_EVENTS = ["pretooluse", "posttooluse", "sessionstart", "stop", "userpromptsubmit"]
