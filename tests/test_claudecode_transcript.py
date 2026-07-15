@@ -64,6 +64,30 @@ def test_session_messages_skips_harness_injected_user_records():
     assert [m.text for m in msgs] == ["real prompt"]
 
 
+def test_session_messages_captures_mid_turn_user_text():
+    # anything the user says MID-TURN (interrupting to redirect the builder) arrives as a
+    # text block in list content, not a plain string — the moment their input matters most.
+    interruption = {"type": "user", "message": {"content": [
+        {"type": "text", "text": "hey don't hardcode that, it gives away the answer"},
+        {"type": "tool_result", "tool_use_id": "z9", "content": "file contents"}]}}
+    recs = [_user("build it"), _tool("m1", "z9", "Read", {"file_path": "/p"}), interruption]
+    texts = [m.text for m in session_messages(recs) if m.role == "user"]
+    assert "hey don't hardcode that, it gives away the answer" in texts
+    assert "file contents" not in texts  # the sibling tool_result stays out
+
+
+def test_session_messages_filters_harness_markers_but_keeps_bracketed_user_text():
+    # markers are matched by name, not by bracket shape: a user may legitimately write
+    # "[important] ..." and must not be silenced by it.
+    def _u(t):
+        return {"type": "user", "message": {"content": [{"type": "text", "text": t}]}}
+
+    recs = [_u("[Request interrupted by user]"), _u("Continue from where you left off."),
+            _u("[Image: source: /tmp/1.png]"), _u("[important] don't hardcode that")]
+    texts = [m.text for m in session_messages(recs) if m.role == "user"]
+    assert texts == ["[important] don't hardcode that"]
+
+
 def test_session_messages_captures_askuserquestion_answers():
     # an AskUserQuestion answer is a user record whose content is a tool_result (not a
     # string); its summary is the user's decision and must reach supervisors. An ordinary

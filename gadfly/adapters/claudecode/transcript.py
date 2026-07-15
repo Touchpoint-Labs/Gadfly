@@ -91,10 +91,12 @@ def session_messages(records: list[dict]) -> list[ConvoEntry]:
     them (deduped, so re-handing the session each gate is idempotent) and decides
     what slice a supervisor sees. Whole-session, not current-turn, so a mid-session
     install isn't blind to everything said before the first gate. Harness-injected
-    user records (\"<system-reminder>\"-style) are noise, not conversation — skipped.
-    An AskUserQuestion answer arrives as a user record whose content is a tool_result,
-    not a string; its summary is the user's decision, so it's captured too — otherwise
-    a supervisor is blind to every choice the builder gathered by asking."""
+    user records are noise, not conversation — skipped.
+
+    A user record's content is a plain string only for a turn-starting prompt. Anything
+    said mid-turn — an interruption redirecting the builder — and any AskUserQuestion
+    answer arrive as blocks in LIST content instead, so those are captured too: without
+    them a supervisor is blind to the corrections and choices that matter most."""
     out: list[ConvoEntry] = []
     ask_ids: set[str] = set()  # AskUserQuestion tool_use ids → their results are user answers
     for rec in records:
@@ -102,11 +104,17 @@ def session_messages(records: list[dict]) -> list[ConvoEntry]:
         content = msg.get("content")
         if rec.get("type") == "user":
             if isinstance(content, str):
-                if content.strip() and not content.lstrip().startswith("<"):
+                if content.strip() and not _is_harness_text(content.strip()):
                     out.append(ConvoEntry("user", "text", content))
                 continue
             for b in content if isinstance(content, list) else []:
-                if (isinstance(b, dict) and b.get("type") == "tool_result"
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text":  # said mid-turn — usually a redirect
+                    text = (b.get("text") or "").strip()
+                    if text and not _is_harness_text(text):
+                        out.append(ConvoEntry("user", "text", text))
+                elif (b.get("type") == "tool_result"
                         and b.get("tool_use_id") in ask_ids):
                     text = _result_text(b.get("content"))
                     if text:
@@ -125,6 +133,25 @@ def session_messages(records: list[dict]) -> list[ConvoEntry]:
             elif b.get("type") == "thinking" and b.get("thinking"):
                 out.append(ConvoEntry("assistant", "thinking", b["thinking"]))
     return out
+
+
+_HARNESS_MARKERS = (  # exact prefixes, never a bare "[...]" rule — a user may well write one
+    "[Request interrupted",
+    "[Image:",
+    "[Your previous response had no visible output",
+)
+
+
+def _is_harness_text(text: str) -> bool:
+    """Text the harness injected into a user record, not something the user said.
+    Matched against known markers rather than shape, and erring toward keeping: an
+    unrecognized marker is harmless noise in a supervisor's context, whereas dropping
+    a real instruction blinds it to exactly the correction it needs."""
+    return (
+        text.startswith("<")
+        or text.startswith(_HARNESS_MARKERS)
+        or text == "Continue from where you left off."
+    )
 
 
 def _result_text(content) -> str:
