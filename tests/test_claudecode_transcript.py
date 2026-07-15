@@ -76,6 +76,19 @@ def test_session_messages_captures_mid_turn_user_text():
     assert "file contents" not in texts  # the sibling tool_result stays out
 
 
+def test_session_messages_skips_tool_authored_text():
+    # A skill load is injected as a user record attributed to the tool call that pulled it
+    # in — it isn't the user speaking, and runs to hundreds of KB that would swamp the tail.
+    # Keyed on sourceToolUseID, so it holds whatever the body's size or wording; isMeta is
+    # NOT usable here (real user messages carry it too).
+    skill = {"type": "user", "sourceToolUseID": "toolu_skill", "isMeta": True,
+             "message": {"content": [{"type": "text", "text": "Approach this as the design lead " + "x" * 9000}]}}
+    real = {"type": "user", "isMeta": True,  # isMeta alone must not silence a real message
+            "message": {"content": [{"type": "text", "text": "stop, wrong file"}]}}
+    texts = [m.text for m in session_messages([skill, real]) if m.role == "user"]
+    assert texts == ["stop, wrong file"]
+
+
 def test_session_messages_filters_harness_markers_but_keeps_bracketed_user_text():
     # markers are matched by name, not by bracket shape: a user may legitimately write
     # "[important] ..." and must not be silenced by it.

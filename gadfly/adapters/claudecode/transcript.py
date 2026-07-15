@@ -107,12 +107,17 @@ def session_messages(records: list[dict]) -> list[ConvoEntry]:
                 if content.strip() and not _is_harness_text(content.strip()):
                     out.append(ConvoEntry("user", "text", content))
                 continue
+            # Text a TOOL produced — a skill load, injected as a user record — is not the
+            # human speaking, and runs to hundreds of KB that would swamp the whole tail.
+            # Structural, so it holds for any injected body whatever its size or wording;
+            # isMeta does NOT work here (real user messages carry it too).
+            tool_authored = "sourceToolUseID" in rec
             for b in content if isinstance(content, list) else []:
                 if not isinstance(b, dict):
                     continue
                 if b.get("type") == "text":  # said mid-turn — usually a redirect
                     text = (b.get("text") or "").strip()
-                    if text and not _is_harness_text(text):
+                    if text and not tool_authored and not _is_harness_text(text):
                         out.append(ConvoEntry("user", "text", text))
                 elif (b.get("type") == "tool_result"
                         and b.get("tool_use_id") in ask_ids):
